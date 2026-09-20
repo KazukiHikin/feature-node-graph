@@ -79,7 +79,7 @@ def _bring_to_front(hwnd):
 
 
 def activate_window():
-    print(f"{WINDOW_TITLE}のアクティブONの関数実行")
+    #各ステップの前に毎回呼ばれる。既に前面なら何もせず即座に戻る
     #マウスが画面の隅に移動すると強制的に停止する機能OFF
     pyautogui.FAILSAFE = False
 
@@ -89,6 +89,10 @@ def activate_window():
         print("")
         return False
 
+    if user32.GetForegroundWindow() == window._hWnd:
+        return True
+
+    print(f"{WINDOW_TITLE}を前面にします")
     for attempt in range(1, RETRY_MAX + 1):
         if _bring_to_front(window._hWnd):
             print(f"{WINDOW_TITLE}のウィンドウがアクティブになりました（{window.width}x{window.height}）")
