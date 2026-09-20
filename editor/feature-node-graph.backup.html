@@ -1,0 +1,560 @@
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .app {
+    background: #1B1B1A;
+    color: #EDEBE3;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid #333230; flex-shrink: 0;
+  }
+  .header h1 { font-size: 15px; font-weight: 500; margin: 0; }
+  .header p { font-size: 12px; color: #8C8A82; margin: 2px 0 0; }
+  .add-btn {
+    background: #2B2B29; border: 1px solid #454440; color: #EDEBE3;
+    font-size: 13px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .add-btn:hover { border-color: #5DCAA5; color: #5DCAA5; }
+  .body { display: flex; flex: 1; min-height: 0; }
+  .canvas-wrap {
+    flex: 1; overflow: auto; position: relative;
+    background-image: radial-gradient(#333230 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .canvas { position: relative; width: 2000px; height: 1300px; transform-origin: 0 0; }
+  .canvas svg { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+  .conn-path { stroke: #767570; stroke-width: 2; fill: none; pointer-events: stroke; cursor: pointer; }
+  .conn-path:hover { stroke: #E24B4A; stroke-width: 2.5; }
+  .temp-path { stroke: #5DCAA5; stroke-width: 2; fill: none; stroke-dasharray: 4 4; }
+  .node {
+    position: absolute; width: 180px; background: #262624;
+    border: 1px solid #454440; border-radius: 8px; user-select: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  }
+  .node.selected { border-color: #5DCAA5; box-shadow: 0 0 0 1px #5DCAA5; }
+  .node-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 8px 9px 12px; font-size: 13px; font-weight: 500; cursor: grab;
+    background: #2F2F2C; border-radius: 7px 7px 0 0;
+  }
+  .node-fields:empty { display: none; }
+  .node:not(:has(.node-fields)) .node-header { border-radius: 7px; }
+  .node-header-name {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .node-collapse-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 4px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .node-collapse-toggle:hover { color: #5DCAA5; }
+  .node-fields { padding: 0 4px 8px; }
+  .node-field-row {
+    display: flex; align-items: center; gap: 4px; padding: 4px 8px 0;
+  }
+  .node-field-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 2px; width: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .node-field-toggle:hover { color: #5DCAA5; }
+  .node-field-label {
+    font-size: 11px; font-weight: 500; color: #9C9A92; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .node-field-value {
+    font-size: 12px; color: #C7C5BC; padding: 2px 8px 4px 24px;
+    white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+  }
+  .socket {
+    position: absolute; top: 50%; width: 12px; height: 12px; margin-top: -6px;
+    border-radius: 50%; background: #8C8A82; border: 2px solid #1B1B1A;
+    cursor: crosshair;
+  }
+  .socket:hover { background: #5DCAA5; }
+  .socket.in { left: -6px; }
+  .socket.out { right: -6px; }
+  .side-panel {
+    width: 280px; flex-shrink: 0; border-left: 1px solid #333230;
+    padding: 20px; overflow-y: auto;
+  }
+  .empty-panel { color: #8C8A82; font-size: 13px; line-height: 1.7; }
+  .field-label { font-size: 11px; color: #8C8A82; margin: 0 0 6px; }
+  input.name-input {
+    font-size: 15px; font-weight: 500; border: none; background: transparent;
+    color: #EDEBE3; width: 100%; padding: 0 0 8px; margin-bottom: 16px;
+    border-bottom: 1px solid #454440; font-family: inherit;
+  }
+  input.name-input:focus { outline: none; border-bottom-color: #5DCAA5; }
+  textarea.overview-input {
+    width: 100%; min-height: 120px; border: 1px solid #454440;
+    border-radius: 6px; padding: 10px; font-size: 13px; line-height: 1.6;
+    font-family: inherit; color: #EDEBE3; background: #1B1B1A; resize: vertical;
+  }
+  textarea.overview-input:focus { outline: none; border-color: #5DCAA5; }
+  .field-block { margin-bottom: 16px; }
+  .field-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .field-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 2px; width: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .field-toggle:hover { color: #5DCAA5; }
+  .field-label-input {
+    flex: 1; min-width: 0; font-size: 11px; color: #8C8A82; background: transparent;
+    border: none; padding: 0; font-family: inherit;
+  }
+  .field-label-input:focus { outline: none; color: #EDEBE3; }
+  .field-remove {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 13px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+  }
+  .field-remove:hover { color: #E24B4A; }
+  .add-field-btn {
+    width: 100%; padding: 8px; border: 1px dashed #454440; background: transparent;
+    color: #8C8A82; border-radius: 6px; cursor: pointer; font-size: 12px; margin-bottom: 16px;
+  }
+  .add-field-btn:hover { border-color: #5DCAA5; color: #5DCAA5; }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .save-status { font-size: 11px; color: #8C8A82; }
+  .delete-btn {
+    border: 1px solid #454440; background: transparent; color: #E24B4A;
+    font-size: 12px; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .delete-btn:hover { background: #E24B4A; color: #1B1B1A; border-color: #E24B4A; }
+</style>
+<div class="app">
+  <div class="header">
+    <div>
+      <h1>機能ノードグラフ</h1>
+      <p>ドラッグで移動、ソケット同士をつなぐと関係線が引けます。線をクリックすると削除されます。</p>
+    </div>
+    <button class="add-btn" id="add-btn">+ 新しいノード</button>
+  </div>
+  <div class="body">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <svg id="svg-layer" width="2000" height="1300"></svg>
+      </div>
+    </div>
+    <div class="side-panel" id="side-panel"></div>
+  </div>
+</div>
+<script>
+const NODE_W = 180;
+const NODE_H = 62;
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 2.5;
+let scale = 1;
+let nodes = [];
+let connections = [];
+let selectedId = null;
+let saveTimer = null;
+
+const canvasWrapEl = document.getElementById('canvas-wrap');
+const canvasEl = document.getElementById('canvas');
+const svgEl = document.getElementById('svg-layer');
+const panelEl = document.getElementById('side-panel');
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+async function loadGraph() {
+  try {
+    const result = await window.storage.get('feature-node-graph', false);
+    if (result) {
+      const parsed = JSON.parse(result.value);
+      nodes = parsed.nodes || [];
+      connections = parsed.connections || [];
+      nodes.forEach(n => {
+        if (!n.fields) {
+          n.fields = [{ id: uid(), label: '概要', value: n.overview || '', expanded: true }];
+        }
+        n.fields.forEach(f => { if (f.expanded === undefined) f.expanded = true; });
+      });
+    } else {
+      seedDefault();
+    }
+  } catch (e) {
+    seedDefault();
+  }
+  renderAll();
+  renderPanel();
+}
+
+function seedDefault() {
+  const a = {
+    id: uid(), name: '認証', x: 60, y: 60,
+    fields: [{ id: uid(), label: '概要', value: 'ログイン状態を確認しトークンを発行する。', expanded: true }]
+  };
+  const b = {
+    id: uid(), name: 'APIゲートウェイ', x: 320, y: 200,
+    fields: [{ id: uid(), label: '概要', value: 'リクエストを各サービスへ振り分ける。', expanded: true }]
+  };
+  nodes = [a, b];
+  connections = [{ id: uid(), from: a.id, to: b.id }];
+}
+
+async function persist(statusEl) {
+  try {
+    const result = await window.storage.set('feature-node-graph', JSON.stringify({ nodes, connections }), false);
+    if (statusEl) statusEl.textContent = result ? '保存済み' : '保存に失敗しました';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '保存に失敗しました';
+  }
+}
+
+function socketPos(node, side) {
+  const el = canvasEl.querySelector('.node[data-id="' + node.id + '"]');
+  const h = el ? el.offsetHeight : NODE_H;
+  return {
+    x: node.x + (side === 'out' ? NODE_W : 0),
+    y: node.y + h / 2
+  };
+}
+
+function bezier(p1, p2) {
+  const dx = Math.max(Math.abs(p2.x - p1.x) * 0.5, 40);
+  return 'M ' + p1.x + ' ' + p1.y + ' C ' + (p1.x + dx) + ' ' + p1.y + ', ' + (p2.x - dx) + ' ' + p2.y + ', ' + p2.x + ' ' + p2.y;
+}
+
+function renderConnections() {
+  const paths = connections.map(c => {
+    const from = nodes.find(n => n.id === c.from);
+    const to = nodes.find(n => n.id === c.to);
+    if (!from || !to) return '';
+    const p1 = socketPos(from, 'out');
+    const p2 = socketPos(to, 'in');
+    return '<path class="conn-path" data-id="' + c.id + '" d="' + bezier(p1, p2) + '"></path>';
+  }).join('');
+  svgEl.innerHTML = paths;
+  svgEl.querySelectorAll('.conn-path').forEach(p => {
+    p.addEventListener('click', () => {
+      connections = connections.filter(c => c.id !== p.dataset.id);
+      renderConnections();
+      persist();
+    });
+  });
+}
+
+function toCanvasCoords(clientX, clientY) {
+  const rect = canvasEl.getBoundingClientRect();
+  return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale };
+}
+
+function renderNodes() {
+  canvasEl.querySelectorAll('.node').forEach(el => el.remove());
+  nodes.forEach(node => {
+    const el = document.createElement('div');
+    el.className = 'node' + (node.id === selectedId ? ' selected' : '');
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+    el.dataset.id = node.id;
+
+    const header = document.createElement('div');
+    header.className = 'node-header';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'node-header-name';
+    nameSpan.textContent = node.name || '無題';
+    header.appendChild(nameSpan);
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'node-collapse-toggle';
+    collapseBtn.textContent = node.collapsed ? '▸' : '▾';
+    collapseBtn.title = node.collapsed ? '項目も表示する' : 'ノード名だけ表示する';
+    collapseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      node.collapsed = !node.collapsed;
+      renderNodes();
+      renderConnections();
+      persist();
+    });
+    header.appendChild(collapseBtn);
+
+    el.appendChild(header);
+
+    if (!node.collapsed) {
+      const fieldsWrap = document.createElement('div');
+      fieldsWrap.className = 'node-fields';
+      (node.fields || []).forEach(field => {
+        const row = document.createElement('div');
+        row.className = 'node-field-row';
+
+        const toggle = document.createElement('button');
+        toggle.className = 'node-field-toggle';
+        toggle.textContent = field.expanded ? '▾' : '▸';
+        toggle.title = field.expanded ? '折りたたむ' : '展開する';
+        toggle.addEventListener('pointerdown', (e) => e.stopPropagation());
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          field.expanded = !field.expanded;
+          renderNodes();
+          renderConnections();
+          if (selectedId === node.id) renderPanel();
+          persist();
+        });
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'node-field-label';
+        labelSpan.textContent = field.label || '項目';
+
+        row.appendChild(toggle);
+        row.appendChild(labelSpan);
+        fieldsWrap.appendChild(row);
+
+        if (field.expanded) {
+          const valueDiv = document.createElement('div');
+          valueDiv.className = 'node-field-value';
+          valueDiv.textContent = field.value || '（未入力）';
+          fieldsWrap.appendChild(valueDiv);
+        }
+      });
+      el.appendChild(fieldsWrap);
+    }
+
+    const inSocket = document.createElement('div');
+    inSocket.className = 'socket in';
+    const outSocket = document.createElement('div');
+    outSocket.className = 'socket out';
+    el.appendChild(inSocket);
+    el.appendChild(outSocket);
+
+    attachNodeDrag(el, node);
+    attachSockets(el, node);
+    canvasEl.appendChild(el);
+  });
+}
+
+function renderAll() {
+  renderNodes();
+  renderConnections();
+}
+
+function attachNodeDrag(el, node) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target.classList.contains('socket')) return;
+    const startX = e.clientX, startY = e.clientY;
+    const initX = node.x, initY = node.y;
+    let moved = false;
+    function onMove(ev) {
+      const dx = (ev.clientX - startX) / scale, dy = (ev.clientY - startY) / scale;
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      node.x = Math.max(0, initX + dx);
+      node.y = Math.max(0, initY + dy);
+      el.style.left = node.x + 'px';
+      el.style.top = node.y + 'px';
+      renderConnections();
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) {
+        persist();
+      } else {
+        selectedId = node.id;
+        renderNodes();
+        renderPanel();
+      }
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function attachSockets(el, node) {
+  const outSocket = el.querySelector('.socket.out');
+  outSocket.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tempPath.setAttribute('class', 'temp-path');
+    svgEl.appendChild(tempPath);
+    const start = socketPos(node, 'out');
+    function onMove(ev) {
+      const cur = toCanvasCoords(ev.clientX, ev.clientY);
+      tempPath.setAttribute('d', bezier(start, cur));
+    }
+    function onUp(ev) {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      tempPath.remove();
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (target && target.classList.contains('socket') && target.classList.contains('in')) {
+        const targetNodeEl = target.closest('.node');
+        const targetId = targetNodeEl ? targetNodeEl.dataset.id : null;
+        if (targetId && targetId !== node.id) {
+          const exists = connections.some(c => c.from === node.id && c.to === targetId);
+          if (!exists) {
+            connections.push({ id: uid(), from: node.id, to: targetId });
+            renderConnections();
+            persist();
+          }
+        }
+      }
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function renderPanel() {
+  const node = nodes.find(n => n.id === selectedId);
+  if (!node) {
+    panelEl.innerHTML = '<p class="empty-panel">ノードをクリックすると、ここで名前や項目を編集できます。</p>';
+    return;
+  }
+  if (!node.fields) node.fields = [];
+  panelEl.innerHTML = '';
+
+  const status = document.createElement('span');
+  status.className = 'save-status';
+
+  function scheduleSave() {
+    status.textContent = '保存中...';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => persist(status), 500);
+    renderNodes();
+  }
+
+  const nameLabel = document.createElement('p');
+  nameLabel.className = 'field-label';
+  nameLabel.textContent = 'ノード名';
+  panelEl.appendChild(nameLabel);
+
+  const nameInput = document.createElement('input');
+  nameInput.className = 'name-input';
+  nameInput.value = node.name;
+  nameInput.addEventListener('input', () => {
+    node.name = nameInput.value;
+    scheduleSave();
+  });
+  panelEl.appendChild(nameInput);
+
+  node.fields.forEach((field, idx) => {
+    const block = document.createElement('div');
+    block.className = 'field-block';
+
+    const header = document.createElement('div');
+    header.className = 'field-header';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'field-toggle';
+    toggleBtn.textContent = field.expanded ? '▾' : '▸';
+    toggleBtn.title = field.expanded ? '折りたたむ' : '展開する';
+    toggleBtn.addEventListener('click', () => {
+      field.expanded = !field.expanded;
+      renderPanel();
+      persist();
+    });
+
+    const labelInput = document.createElement('input');
+    labelInput.className = 'field-label-input';
+    labelInput.value = field.label;
+    labelInput.placeholder = '項目名';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'field-remove';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'この項目を削除';
+    removeBtn.addEventListener('click', () => {
+      node.fields.splice(idx, 1);
+      renderPanel();
+      renderNodes();
+      persist();
+    });
+
+    header.appendChild(toggleBtn);
+    header.appendChild(labelInput);
+    header.appendChild(removeBtn);
+    block.appendChild(header);
+
+    if (field.expanded) {
+      const valueInput = document.createElement('textarea');
+      valueInput.className = 'overview-input';
+      valueInput.value = field.value;
+      valueInput.placeholder = '内容を入力';
+      valueInput.addEventListener('input', () => {
+        field.value = valueInput.value;
+        scheduleSave();
+      });
+      block.appendChild(valueInput);
+    }
+
+    labelInput.addEventListener('input', () => {
+      field.label = labelInput.value;
+      scheduleSave();
+    });
+
+    panelEl.appendChild(block);
+  });
+
+  const addFieldBtn = document.createElement('button');
+  addFieldBtn.className = 'add-field-btn';
+  addFieldBtn.textContent = '+ 項目を追加';
+  addFieldBtn.addEventListener('click', () => {
+    node.fields.push({ id: uid(), label: '', value: '', expanded: true });
+    renderPanel();
+    persist();
+  });
+  panelEl.appendChild(addFieldBtn);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const delBtn = document.createElement('button');
+  delBtn.className = 'delete-btn';
+  delBtn.textContent = 'ノードを削除';
+  delBtn.onclick = () => {
+    if (!confirm('このノードと接続を削除しますか？')) return;
+    connections = connections.filter(c => c.from !== node.id && c.to !== node.id);
+    nodes = nodes.filter(n => n.id !== node.id);
+    selectedId = null;
+    renderAll();
+    renderPanel();
+    persist();
+  };
+  actions.appendChild(status);
+  actions.appendChild(delBtn);
+  panelEl.appendChild(actions);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+canvasWrapEl.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const rect = canvasWrapEl.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const contentX = (canvasWrapEl.scrollLeft + mx) / scale;
+  const contentY = (canvasWrapEl.scrollTop + my) / scale;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+  canvasEl.style.transform = 'scale(' + scale + ')';
+  canvasWrapEl.scrollLeft = contentX * scale - mx;
+  canvasWrapEl.scrollTop = contentY * scale - my;
+}, { passive: false });
+
+document.getElementById('add-btn').addEventListener('click', () => {
+  const node = {
+    id: uid(), name: '新しいノード',
+    fields: [{ id: uid(), label: '概要', value: '', expanded: true }],
+    x: 40 + Math.random() * 120, y: 40 + Math.random() * 260
+  };
+  nodes.push(node);
+  selectedId = node.id;
+  renderAll();
+  renderPanel();
+  persist();
+});
+
+loadGraph();
+</script>

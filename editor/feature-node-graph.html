@@ -1,0 +1,1542 @@
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .app {
+    background: #1B1B1A;
+    color: #EDEBE3;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid #333230; flex-shrink: 0;
+  }
+  .header h1 { font-size: 15px; font-weight: 500; margin: 0; }
+  .header p { font-size: 12px; color: #8C8A82; margin: 2px 0 0; }
+  .add-btn {
+    background: #2B2B29; border: 1px solid #454440; color: #EDEBE3;
+    font-size: 13px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .add-btn:hover { border-color: #5DCAA5; color: #5DCAA5; }
+  .body { display: flex; flex: 1; min-height: 0; }
+  .canvas-wrap {
+    flex: 1; overflow: auto; position: relative;
+    background-image: radial-gradient(#333230 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .canvas { position: relative; width: 2000px; height: 1300px; transform-origin: 0 0; }
+  .canvas-wrap.panning,
+  .canvas-wrap.panning .node-header,
+  .canvas-wrap.panning .socket { cursor: grabbing; }
+  .canvas svg { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
+  /* 線は「見た目用の細い線」と「当たり判定用の太い透明な線」の2本を
+     1つの <g class="conn"> にまとめている。細い線のままだと右クリックで
+     掴みづらいため。ホバー色はグループ側で切り替える。 */
+  .conn-path { stroke: #767570; stroke-width: 2; fill: none; pointer-events: none; }
+  .conn-hit { stroke: transparent; stroke-width: 16; fill: none; pointer-events: stroke; cursor: context-menu; }
+  .conn:hover .conn-path { stroke: #5DCAA5; stroke-width: 2.5; }
+  .temp-path { stroke: #5DCAA5; stroke-width: 2; fill: none; stroke-dasharray: 4 4; }
+  .conn-point {
+    fill: #A9A79E; stroke: #1B1B1A; stroke-width: 2;
+    pointer-events: all; cursor: grab;
+  }
+  .conn-point:hover { fill: #5DCAA5; }
+
+  /* 右クリックメニュー */
+  .ctx-menu {
+    position: fixed; z-index: 60; background: #262624; border: 1px solid #454440;
+    border-radius: 6px; padding: 4px; min-width: 170px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  }
+  .ctx-menu[hidden] { display: none; }
+  .ctx-menu button {
+    display: block; width: 100%; text-align: left; background: transparent;
+    border: none; color: #EDEBE3; font-size: 12px; padding: 7px 10px;
+    border-radius: 4px; cursor: pointer; font-family: inherit;
+  }
+  .ctx-menu button:hover { background: #2F2F2C; color: #5DCAA5; }
+  .ctx-menu button.danger:hover { background: #2F2F2C; color: #E24B4A; }
+  .ctx-menu hr { border: none; border-top: 1px solid #333230; margin: 4px 2px; }
+  /* --- フレーム ---
+     重なり順は frame(0) < 線のSVG(1) < node(2)。position が付いた要素同士
+     なので z-index がそのまま効く。 */
+  .frame {
+    position: absolute; z-index: 0; border: 1px solid #4A4946; border-radius: 10px;
+    cursor: grab; user-select: none;
+  }
+  .frame.dragging { cursor: grabbing; }
+  .frame-label {
+    position: absolute; top: 0; left: 0; right: 18px;
+    font-size: 12px; color: #C7C5BC; padding: 7px 10px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .frame-label-input {
+    position: absolute; top: 4px; left: 6px; right: 22px;
+    font-size: 12px; font-family: inherit; color: #EDEBE3;
+    background: #1B1B1A; border: 1px solid #5DCAA5; border-radius: 4px; padding: 3px 5px;
+  }
+  .frame-label-input:focus { outline: none; }
+  .frame-resize {
+    position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+    cursor: nwse-resize;
+    background:
+      linear-gradient(135deg, transparent 0 55%, #6E6D68 55% 65%, transparent 65% 75%, #6E6D68 75% 85%, transparent 85%);
+    border-bottom-right-radius: 10px;
+  }
+  .frame-resize:hover { background:
+      linear-gradient(135deg, transparent 0 55%, #5DCAA5 55% 65%, transparent 65% 75%, #5DCAA5 75% 85%, transparent 85%); }
+
+  .node {
+    position: absolute; z-index: 2; width: 180px; background: #262624;
+    border: 1px solid #454440; border-radius: 8px; user-select: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  }
+  .node.selected { border-color: #5DCAA5; box-shadow: 0 0 0 1px #5DCAA5; }
+  .node-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 8px 9px 12px; font-size: 13px; font-weight: 500; cursor: grab;
+    background: #2F2F2C; border-radius: 7px 7px 0 0;
+  }
+  .node-fields:empty { display: none; }
+  .node:not(:has(.node-fields)) .node-header { border-radius: 7px; }
+  .node-header-name {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .node-collapse-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 4px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .node-collapse-toggle:hover { color: #5DCAA5; }
+  .node-fields { padding: 0 4px 8px; }
+  .node-field-row {
+    display: flex; align-items: center; gap: 4px; padding: 4px 8px 0;
+  }
+  .node-field-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 2px; width: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .node-field-toggle:hover { color: #5DCAA5; }
+  .node-field-label {
+    font-size: 11px; font-weight: 500; color: #9C9A92; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .node-field-value {
+    font-size: 12px; color: #C7C5BC; padding: 2px 8px 4px 24px;
+    white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+  }
+  .socket {
+    position: absolute; top: 50%; width: 12px; height: 12px; margin-top: -6px;
+    border-radius: 50%; background: #8C8A82; border: 2px solid #1B1B1A;
+    cursor: crosshair;
+  }
+  .socket:hover { background: #5DCAA5; }
+  .socket.in { left: -6px; }
+  .socket.out { right: -6px; }
+  .side-panel {
+    width: 280px; flex-shrink: 0; border-left: 1px solid #333230;
+    padding: 20px; overflow-y: auto;
+  }
+  .empty-panel { color: #8C8A82; font-size: 13px; line-height: 1.7; }
+  .field-label { font-size: 11px; color: #8C8A82; margin: 0 0 6px; }
+  input.name-input {
+    font-size: 15px; font-weight: 500; border: none; background: transparent;
+    color: #EDEBE3; width: 100%; padding: 0 0 8px; margin-bottom: 16px;
+    border-bottom: 1px solid #454440; font-family: inherit;
+  }
+  input.name-input:focus { outline: none; border-bottom-color: #5DCAA5; }
+  textarea.overview-input {
+    width: 100%; min-height: 120px; border: 1px solid #454440;
+    border-radius: 6px; padding: 10px; font-size: 13px; line-height: 1.6;
+    font-family: inherit; color: #EDEBE3; background: #1B1B1A; resize: vertical;
+  }
+  textarea.overview-input:focus { outline: none; border-color: #5DCAA5; }
+  .field-block { margin-bottom: 16px; }
+  .field-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .field-toggle {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 2px; width: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .field-toggle:hover { color: #5DCAA5; }
+  .field-label-input {
+    flex: 1; min-width: 0; font-size: 11px; color: #8C8A82; background: transparent;
+    border: none; padding: 0; font-family: inherit;
+  }
+  .field-label-input:focus { outline: none; color: #EDEBE3; }
+  .field-remove {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 13px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+  }
+  .field-remove:hover { color: #E24B4A; }
+  .add-field-btn {
+    width: 100%; padding: 8px; border: 1px dashed #454440; background: transparent;
+    color: #8C8A82; border-radius: 6px; cursor: pointer; font-size: 12px; margin-bottom: 16px;
+  }
+  .add-field-btn:hover { border-color: #5DCAA5; color: #5DCAA5; }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .save-status { font-size: 11px; color: #8C8A82; }
+  .delete-btn {
+    border: 1px solid #454440; background: transparent; color: #E24B4A;
+    font-size: 12px; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .delete-btn:hover { background: #E24B4A; color: #1B1B1A; border-color: #E24B4A; }
+
+  /* --- ヘッダーのボタン群 --- */
+  .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .storage-badge {
+    font-size: 11px; color: #8C8A82; border: 1px solid #333230;
+    border-radius: 5px; padding: 4px 8px; white-space: nowrap;
+  }
+
+  /* --- データ入出力モーダル --- */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .modal-backdrop[hidden] { display: none; }
+  .modal {
+    background: #262624; border: 1px solid #454440; border-radius: 10px;
+    width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .modal h2 { font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+  .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .modal-close {
+    background: transparent; border: none; color: #8C8A82; cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 4px;
+  }
+  .modal-close:hover { color: #E24B4A; }
+  .modal-section { border-top: 1px solid #333230; padding-top: 16px; margin-top: 16px; }
+  .modal-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .modal-section h3 { font-size: 12px; font-weight: 500; color: #9C9A92; margin: 0 0 8px; }
+  .modal textarea {
+    width: 100%; min-height: 110px; border: 1px solid #454440; border-radius: 6px;
+    padding: 10px; font-size: 12px; line-height: 1.5; color: #EDEBE3;
+    background: #1B1B1A; resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .modal textarea:focus { outline: none; border-color: #5DCAA5; }
+  .modal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .modal-btn {
+    background: #2B2B29; border: 1px solid #454440; color: #EDEBE3;
+    font-size: 12px; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  }
+  .modal-btn:hover:not(:disabled) { border-color: #5DCAA5; color: #5DCAA5; }
+  .modal-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .modal-btn.primary { border-color: #5DCAA5; color: #5DCAA5; }
+  .modal-btn.primary:hover:not(:disabled) { background: #5DCAA5; color: #1B1B1A; }
+  .modal-note { font-size: 11px; color: #8C8A82; line-height: 1.6; margin: 8px 0 0; }
+  .modal-msg { font-size: 12px; line-height: 1.6; margin: 8px 0 0; min-height: 1.2em; }
+  .modal-msg.ok { color: #5DCAA5; }
+  .modal-msg.err { color: #E24B4A; }
+  .radio-group { display: flex; gap: 14px; font-size: 12px; color: #C7C5BC; }
+  .radio-group label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .radio-group input { accent-color: #5DCAA5; margin: 0; }
+  .file-input { display: none; }
+</style>
+<div class="app">
+  <div class="header">
+    <div>
+      <h1>機能ノードグラフ</h1>
+      <p>ドラッグで移動、ソケット同士をつなぐと関係線が引けます。線や点・フレームは右クリックでメニュー。フレームに入れたノードはフレームごと動きます。ホイールボタンを押しながら動かすと視点移動、Ctrl+ホイールで拡大縮小。</p>
+    </div>
+    <div class="header-actions">
+      <span class="storage-badge" id="storage-badge">保存先を確認中…</span>
+      <button class="add-btn" id="data-btn">データ</button>
+      <button class="add-btn" id="add-frame-btn">+ フレーム</button>
+      <button class="add-btn" id="add-btn">+ 新しいノード</button>
+    </div>
+  </div>
+  <div class="body">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <svg id="svg-layer" width="2000" height="1300"></svg>
+      </div>
+    </div>
+    <div class="side-panel" id="side-panel"></div>
+  </div>
+</div>
+
+<div class="ctx-menu" id="ctx-menu" hidden></div>
+
+<div class="modal-backdrop" id="data-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2>データの書き出し・読み込み</h2>
+        <p class="modal-note" id="modal-summary"></p>
+      </div>
+      <button class="modal-close" id="modal-close" title="閉じる">✕</button>
+    </div>
+
+    <div class="modal-section">
+      <h3>書き出し（エクスポート）</h3>
+      <textarea id="export-text" readonly spellcheck="false"></textarea>
+      <div class="modal-row">
+        <button class="modal-btn" id="copy-btn">テキストをコピー</button>
+        <button class="modal-btn" id="download-btn">.json ファイルとして保存</button>
+      </div>
+      <p class="modal-note" id="download-note"></p>
+      <p class="modal-msg" id="export-msg"></p>
+    </div>
+
+    <div class="modal-section">
+      <h3>読み込み（インポート）</h3>
+      <textarea id="import-text" spellcheck="false" placeholder="ここにJSONを貼り付けるか、下の「ファイルを選ぶ」から .json を読み込んでください"></textarea>
+      <div class="modal-row">
+        <div class="radio-group">
+          <label><input type="radio" name="import-mode" value="replace" checked> 置き換え</label>
+          <label><input type="radio" name="import-mode" value="merge"> 今のグラフに追記</label>
+        </div>
+      </div>
+      <div class="modal-row">
+        <button class="modal-btn" id="file-btn">ファイルを選ぶ</button>
+        <input type="file" class="file-input" id="file-input" accept="application/json,.json">
+        <button class="modal-btn primary" id="import-btn">読み込む</button>
+      </div>
+      <p class="modal-msg" id="import-msg"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const NODE_W = 180;
+const NODE_H = 62;
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 2.5;
+let scale = 1;
+let nodes = [];
+let connections = [];
+let frames = [];
+let selectedId = null;
+let saveTimer = null;
+
+const canvasWrapEl = document.getElementById('canvas-wrap');
+const canvasEl = document.getElementById('canvas');
+const svgEl = document.getElementById('svg-layer');
+const panelEl = document.getElementById('side-panel');
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+/* ------------------------------------------------------------------
+   保存レイヤー
+   window.storage は Artifact ランタイムが注入する独自APIで、ブラウザ標準
+   ではない。ローカルの .html を直接開いたときは存在しないので、その場合は
+   ブラウザ標準の localStorage に落とす。呼び出し側はこの store だけを見る。
+------------------------------------------------------------------- */
+const STORAGE_KEY = 'feature-node-graph';
+const USE_ARTIFACT_STORAGE =
+  typeof window.storage === 'object' && window.storage !== null &&
+  typeof window.storage.get === 'function' && typeof window.storage.set === 'function';
+
+const store = {
+  mode: USE_ARTIFACT_STORAGE ? 'artifact' : 'local',
+  async get() {
+    if (USE_ARTIFACT_STORAGE) {
+      const result = await window.storage.get(STORAGE_KEY, false);
+      return result ? result.value : null;
+    }
+    try {
+      return localStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return null;
+    }
+  },
+  async set(value) {
+    if (USE_ARTIFACT_STORAGE) {
+      return await window.storage.set(STORAGE_KEY, value, false);
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+};
+
+async function loadGraph() {
+  try {
+    const value = await store.get();
+    if (value) {
+      const graph = normalizeGraph(JSON.parse(value));
+      nodes = graph.nodes;
+      connections = graph.connections;
+      frames = graph.frames;
+      if (!nodes.length && !frames.length) seedDefault();
+    } else {
+      seedDefault();
+    }
+  } catch (e) {
+    seedDefault();
+  }
+  updateStorageBadge();
+  renderAll();
+  renderPanel();
+}
+
+function seedDefault() {
+  const a = {
+    id: uid(), name: '認証', x: 60, y: 60,
+    fields: [{ id: uid(), label: '概要', value: 'ログイン状態を確認しトークンを発行する。', expanded: true }]
+  };
+  const b = {
+    id: uid(), name: 'APIゲートウェイ', x: 320, y: 200,
+    fields: [{ id: uid(), label: '概要', value: 'リクエストを各サービスへ振り分ける。', expanded: true }]
+  };
+  nodes = [a, b];
+  connections = [{ id: uid(), from: a.id, to: b.id, points: [] }];
+  frames = [];
+}
+
+async function persist(statusEl) {
+  try {
+    const result = await store.set(JSON.stringify({ nodes, connections, frames }));
+    if (statusEl) statusEl.textContent = result ? '保存済み' : '保存に失敗しました';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '保存に失敗しました';
+  }
+}
+
+function updateStorageBadge() {
+  const badge = document.getElementById('storage-badge');
+  if (!badge) return;
+  if (store.mode === 'artifact') {
+    badge.textContent = '保存先: Artifact';
+    badge.title = 'window.storage に保存しています。';
+  } else {
+    badge.textContent = '保存先: このブラウザ';
+    badge.title = 'localStorage に保存しています。同じブラウザの同じ場所で開いたときだけ復元されます。';
+  }
+}
+
+/* ------------------------------------------------------------------
+   JSONの正規化・検証
+   外から来たJSONをそのまま信用せず、描画側が前提にしている形
+   （id / name / x / y / fields / connections）に整えてから受け取る。
+------------------------------------------------------------------- */
+function normalizeField(raw) {
+  const f = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    id: typeof f.id === 'string' && f.id ? f.id : uid(),
+    label: typeof f.label === 'string' ? f.label : '',
+    value: typeof f.value === 'string' ? f.value : (f.value == null ? '' : String(f.value)),
+    expanded: f.expanded === undefined ? true : !!f.expanded
+  };
+}
+
+const FRAME_COLORS = ['#5DCAA5', '#6FA8DC', '#D9A25F', '#C98BD1', '#8C8A82'];
+const FRAME_MIN_W = 160;
+const FRAME_MIN_H = 120;
+
+function normalizeFrame(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? v : fallback);
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : uid(),
+    label: typeof raw.label === 'string' ? raw.label : '',
+    x: Math.max(0, num(raw.x, 40)),
+    y: Math.max(0, num(raw.y, 40)),
+    w: Math.max(FRAME_MIN_W, num(raw.w, 360)),
+    h: Math.max(FRAME_MIN_H, num(raw.h, 240)),
+    color: typeof raw.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : FRAME_COLORS[0]
+  };
+}
+
+function normalizeNode(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? Math.max(0, v) : fallback);
+  let fields;
+  if (Array.isArray(raw.fields)) {
+    fields = raw.fields.map(normalizeField);
+  } else {
+    // 旧形式（overview 1つだけ持っていた頃）からの引き上げ
+    fields = [{ id: uid(), label: '概要', value: typeof raw.overview === 'string' ? raw.overview : '', expanded: true }];
+  }
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : uid(),
+    name: typeof raw.name === 'string' ? raw.name : '無題',
+    x: num(raw.x, 40),
+    y: num(raw.y, 40),
+    collapsed: !!raw.collapsed,
+    // 所属フレーム。実在するフレームかどうかは normalizeGraph 側で確かめる。
+    frameId: typeof raw.frameId === 'string' && raw.frameId ? raw.frameId : null,
+    fields: fields
+  };
+}
+
+function normalizeGraph(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('JSONの形式が違います（オブジェクトではありません）。');
+  }
+  if (!Array.isArray(raw.nodes)) {
+    throw new Error('nodes（ノードの配列）が見つかりません。');
+  }
+
+  // フレームを先に確定させる。ノードの frameId がこれを参照するため。
+  const frameSeen = new Set();
+  const frameIdMap = new Map();
+  const outFrames = [];
+  (Array.isArray(raw.frames) ? raw.frames : []).forEach(rawFrame => {
+    const frame = normalizeFrame(rawFrame);
+    if (!frame) return;
+    const original = (rawFrame && typeof rawFrame.id === 'string') ? rawFrame.id : frame.id;
+    if (frameSeen.has(frame.id)) frame.id = uid();
+    frameSeen.add(frame.id);
+    frameIdMap.set(original, frame.id);
+    outFrames.push(frame);
+  });
+
+  const seen = new Set();
+  const outNodes = [];
+  const idMap = new Map();
+  raw.nodes.forEach(rawNode => {
+    const node = normalizeNode(rawNode);
+    if (!node) return;
+    const original = (rawNode && typeof rawNode.id === 'string') ? rawNode.id : node.id;
+    if (seen.has(node.id)) node.id = uid();
+    seen.add(node.id);
+    idMap.set(original, node.id);
+    // 実在しないフレームを指していたら所属なしに戻す
+    node.frameId = node.frameId && frameIdMap.has(node.frameId) ? frameIdMap.get(node.frameId) : null;
+    outNodes.push(node);
+  });
+
+  const rawConns = Array.isArray(raw.connections) ? raw.connections : [];
+  const pairs = new Set();
+  const connIds = new Set();
+  const outConns = [];
+  rawConns.forEach(c => {
+    if (!c || typeof c !== 'object') return;
+    const from = idMap.get(c.from);
+    const to = idMap.get(c.to);
+    if (!from || !to || from === to) return;
+    const key = from + '>' + to;
+    if (pairs.has(key)) return;
+    pairs.add(key);
+    let cid = (typeof c.id === 'string' && c.id) ? c.id : uid();
+    if (connIds.has(cid)) cid = uid();
+    connIds.add(cid);
+    // 折り返し点。座標が数値として読めるものだけ残す。
+    const points = Array.isArray(c.points)
+      ? c.points
+          .filter(p => p && typeof p === 'object' &&
+                       typeof p.x === 'number' && isFinite(p.x) &&
+                       typeof p.y === 'number' && isFinite(p.y))
+          .map(p => ({ x: Math.max(0, p.x), y: Math.max(0, p.y) }))
+      : [];
+    outConns.push({ id: cid, from: from, to: to, points: points });
+  });
+
+  return { nodes: outNodes, connections: outConns, frames: outFrames };
+}
+
+function socketPos(node, side) {
+  const el = canvasEl.querySelector('.node[data-id="' + node.id + '"]');
+  const h = el ? el.offsetHeight : NODE_H;
+  return {
+    x: node.x + (side === 'out' ? NODE_W : 0),
+    y: node.y + h / 2
+  };
+}
+
+function bezier(p1, p2) {
+  const dx = Math.max(Math.abs(p2.x - p1.x) * 0.5, 40);
+  return 'M ' + p1.x + ' ' + p1.y + ' C ' + (p1.x + dx) + ' ' + p1.y + ', ' + (p2.x - dx) + ' ' + p2.y + ', ' + p2.x + ' ' + p2.y;
+}
+
+/* ------------------------------------------------------------------
+   線の折り返し点（ウェイポイント）
+   connections[i].points = [{x, y}, ...] という配列で持つ。座標は
+   キャンバス座標（ズーム前）で、ノードの x / y と同じ物差し。
+   線は out ソケット → points を順に通過 → in ソケット、と描く。
+------------------------------------------------------------------- */
+function connPoints(conn) {
+  const from = nodes.find(n => n.id === conn.from);
+  const to = nodes.find(n => n.id === conn.to);
+  if (!from || !to) return null;
+  return [socketPos(from, 'out')].concat(conn.points || []).concat([socketPos(to, 'in')]);
+}
+
+// 通過点を順につなぐ。各区間は bezier() と同じ「水平に出て水平に入る」形。
+function pathThrough(points) {
+  let d = 'M ' + points[0].x + ' ' + points[0].y;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = Math.max(Math.abs(b.x - a.x) * 0.5, 40);
+    d += ' C ' + (a.x + dx) + ' ' + a.y + ', ' + (b.x - dx) + ' ' + b.y + ', ' + b.x + ' ' + b.y;
+  }
+  return d;
+}
+
+function distToSegment(p, a, b) {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const dx = p.x - (a.x + t * vx);
+  const dy = p.y - (a.y + t * vy);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// クリック位置に一番近い区間を探し、points のどこに差し込むべきかを返す。
+function insertIndexFor(conn, pos) {
+  const pts = connPoints(conn);
+  if (!pts) return 0;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = distToSegment(pos, pts[i], pts[i + 1]);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function renderConnections() {
+  let html = '';
+  let dots = '';
+  connections.forEach(c => {
+    const pts = connPoints(c);
+    if (!pts) return;
+    const d = pathThrough(pts);
+    html += '<g class="conn" data-id="' + c.id + '">' +
+              '<path class="conn-hit" d="' + d + '"></path>' +
+              '<path class="conn-path" d="' + d + '"></path>' +
+            '</g>';
+    (c.points || []).forEach((p, i) => {
+      dots += '<circle class="conn-point" data-id="' + c.id + '" data-index="' + i + '" ' +
+              'cx="' + p.x + '" cy="' + p.y + '" r="5"></circle>';
+    });
+  });
+  // 点は線より後ろに置いて、常に線の上に描かれるようにする
+  svgEl.innerHTML = html + dots;
+
+  svgEl.querySelectorAll('.conn').forEach(g => {
+    g.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const conn = connections.find(c => c.id === g.dataset.id);
+      if (!conn) return;
+      const pos = toCanvasCoords(e.clientX, e.clientY);
+      openCtxMenu(e.clientX, e.clientY, [
+        { label: 'ここに点を追加', run: () => addWaypoint(conn, pos) },
+        { separator: true },
+        { label: 'この線を削除', danger: true, run: () => removeConnection(conn.id) }
+      ]);
+    });
+  });
+
+  svgEl.querySelectorAll('.conn-point').forEach(circle => {
+    const conn = connections.find(c => c.id === circle.dataset.id);
+    if (!conn) return;
+    const index = Number(circle.dataset.index);
+
+    circle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const point = (conn.points || [])[index];
+      if (!point) return;
+      function onMove(ev) {
+        const pos = toCanvasCoords(ev.clientX, ev.clientY);
+        point.x = Math.max(0, pos.x);
+        point.y = Math.max(0, pos.y);
+        renderConnections(); // 円の要素は作り直されるが、動かしているのは point（データ）なので問題ない
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        persist();
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+
+    circle.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCtxMenu(e.clientX, e.clientY, [
+        { label: 'この点を削除', run: () => removeWaypoint(conn, index) },
+        { separator: true },
+        { label: 'この線を削除', danger: true, run: () => removeConnection(conn.id) }
+      ]);
+    });
+  });
+}
+
+function addWaypoint(conn, pos) {
+  if (!conn.points) conn.points = [];
+  conn.points.splice(insertIndexFor(conn, pos), 0, { x: Math.max(0, pos.x), y: Math.max(0, pos.y) });
+  renderConnections();
+  persist();
+}
+
+function removeWaypoint(conn, index) {
+  if (!conn.points) return;
+  conn.points.splice(index, 1);
+  renderConnections();
+  persist();
+}
+
+function removeConnection(id) {
+  connections = connections.filter(c => c.id !== id);
+  renderConnections();
+  persist();
+}
+
+/* ------------------------------------------------------------------
+   右クリックメニュー
+   items: [{ label, run, danger } | { separator: true }]
+------------------------------------------------------------------- */
+const ctxMenuEl = document.getElementById('ctx-menu');
+
+function closeCtxMenu() {
+  ctxMenuEl.hidden = true;
+  ctxMenuEl.innerHTML = '';
+}
+
+function openCtxMenu(clientX, clientY, items) {
+  ctxMenuEl.innerHTML = '';
+  items.forEach(item => {
+    if (item.separator) {
+      ctxMenuEl.appendChild(document.createElement('hr'));
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = item.label;
+    if (item.danger) btn.className = 'danger';
+    btn.addEventListener('click', () => {
+      closeCtxMenu();
+      item.run();
+    });
+    ctxMenuEl.appendChild(btn);
+  });
+  // いったん表示してから実寸を測り、画面外にはみ出す分を戻す
+  ctxMenuEl.style.left = '0px';
+  ctxMenuEl.style.top = '0px';
+  ctxMenuEl.hidden = false;
+  const rect = ctxMenuEl.getBoundingClientRect();
+  const x = Math.min(clientX, window.innerWidth - rect.width - 8);
+  const y = Math.min(clientY, window.innerHeight - rect.height - 8);
+  ctxMenuEl.style.left = Math.max(8, x) + 'px';
+  ctxMenuEl.style.top = Math.max(8, y) + 'px';
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (!ctxMenuEl.hidden && !ctxMenuEl.contains(e.target)) closeCtxMenu();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeCtxMenu();
+});
+window.addEventListener('blur', closeCtxMenu);
+
+function toCanvasCoords(clientX, clientY) {
+  const rect = canvasEl.getBoundingClientRect();
+  return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale };
+}
+
+/* ------------------------------------------------------------------
+   フレーム
+   frames[] に矩形として持ち、「どのノードがどのフレームに属するか」は
+   nodes[i].frameId 側にだけ持たせる（フレーム側にも children を持つと
+   二重管理になって必ずズレるため、持ち主は片方だけ）。
+   所属はノード中心の位置で自動判定する。
+------------------------------------------------------------------- */
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function nodeSize(node) {
+  const el = canvasEl.querySelector('.node[data-id="' + node.id + '"]');
+  return { w: NODE_W, h: el ? el.offsetHeight : NODE_H };
+}
+
+// その座標を含むフレーム。入れ子に重なっている場合は面積の小さい方を優先。
+function frameAtPoint(cx, cy) {
+  let best = null;
+  frames.forEach(f => {
+    if (cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h) {
+      if (!best || f.w * f.h < best.w * best.h) best = f;
+    }
+  });
+  return best;
+}
+
+function updateNodeMembership(node) {
+  const size = nodeSize(node);
+  const frame = frameAtPoint(node.x + size.w / 2, node.y + size.h / 2);
+  node.frameId = frame ? frame.id : null;
+}
+
+function membersOf(frameId) {
+  return nodes.filter(n => n.frameId === frameId);
+}
+
+function fitFrame(frame) {
+  const members = membersOf(frame.id);
+  if (!members.length) return;
+  const pad = 24;
+  const padTop = 36; // ラベルの分だけ上を広めに取る
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  members.forEach(n => {
+    const size = nodeSize(n);
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + size.w);
+    maxY = Math.max(maxY, n.y + size.h);
+  });
+  frame.x = Math.max(0, minX - pad);
+  frame.y = Math.max(0, minY - padTop);
+  frame.w = Math.max(FRAME_MIN_W, (maxX + pad) - frame.x);
+  frame.h = Math.max(FRAME_MIN_H, (maxY + pad) - frame.y);
+}
+
+function removeFrame(id) {
+  frames = frames.filter(f => f.id !== id);
+  nodes.forEach(n => { if (n.frameId === id) n.frameId = null; });
+  renderFrames();
+  persist();
+}
+
+function editFrameLabel(el, frame) {
+  if (el.querySelector('.frame-label-input')) return;
+  const input = document.createElement('input');
+  input.className = 'frame-label-input';
+  input.value = frame.label;
+  input.placeholder = 'フレーム名';
+  input.addEventListener('pointerdown', (e) => e.stopPropagation()); // 入力中にフレームを掴まない
+  input.addEventListener('blur', () => {
+    frame.label = input.value;
+    renderFrames();
+    persist();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); input.value = frame.label; input.blur(); }
+  });
+  el.appendChild(input);
+  input.focus();
+  input.select();
+}
+
+function attachFrameDrag(el, frame) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.classList.contains('frame-resize')) return;
+    if (e.target.classList.contains('frame-label-input')) return;
+    const startX = e.clientX, startY = e.clientY;
+    const initX = frame.x, initY = frame.y;
+    // 掴んだ時点のメンバーとその位置を控える（ドラッグ中に所属は変えない）
+    const members = membersOf(frame.id).map(n => ({
+      node: n, x: n.x, y: n.y,
+      el: canvasEl.querySelector('.node[data-id="' + n.id + '"]')
+    }));
+    let moved = false;
+    el.classList.add('dragging');
+
+    function onMove(ev) {
+      const dx = (ev.clientX - startX) / scale;
+      const dy = (ev.clientY - startY) / scale;
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      frame.x = Math.max(0, initX + dx);
+      frame.y = Math.max(0, initY + dy);
+      el.style.left = frame.x + 'px';
+      el.style.top = frame.y + 'px';
+      // 0で止まった分を差し引いた「実際に動いた量」を子にも同じだけ適用する
+      const appliedDx = frame.x - initX;
+      const appliedDy = frame.y - initY;
+      members.forEach(m => {
+        m.node.x = Math.max(0, m.x + appliedDx);
+        m.node.y = Math.max(0, m.y + appliedDy);
+        if (m.el) {
+          m.el.style.left = m.node.x + 'px';
+          m.el.style.top = m.node.y + 'px';
+        }
+      });
+      renderConnections();
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      el.classList.remove('dragging');
+      if (moved) persist();
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function attachFrameResize(handle, el, frame) {
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const initW = frame.w, initH = frame.h;
+    function onMove(ev) {
+      frame.w = Math.max(FRAME_MIN_W, initW + (ev.clientX - startX) / scale);
+      frame.h = Math.max(FRAME_MIN_H, initH + (ev.clientY - startY) / scale);
+      el.style.width = frame.w + 'px';
+      el.style.height = frame.h + 'px';
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      nodes.forEach(updateNodeMembership); // 広げた／縮めた結果の出入りを拾い直す
+      persist();
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function renderFrames() {
+  canvasEl.querySelectorAll('.frame').forEach(el => el.remove());
+  frames.forEach(frame => {
+    const el = document.createElement('div');
+    el.className = 'frame';
+    el.dataset.id = frame.id;
+    el.style.left = frame.x + 'px';
+    el.style.top = frame.y + 'px';
+    el.style.width = frame.w + 'px';
+    el.style.height = frame.h + 'px';
+    el.style.borderColor = hexToRgba(frame.color, 0.55);
+    el.style.background = hexToRgba(frame.color, 0.07);
+
+    const label = document.createElement('div');
+    label.className = 'frame-label';
+    label.textContent = frame.label || 'フレーム';
+    label.style.color = hexToRgba(frame.color, 0.95);
+    label.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      editFrameLabel(el, frame);
+    });
+    el.appendChild(label);
+
+    const handle = document.createElement('div');
+    handle.className = 'frame-resize';
+    el.appendChild(handle);
+
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const items = [
+        { label: '名前を変更', run: () => editFrameLabel(el, frame) },
+        { label: '中身に合わせる', run: () => { fitFrame(frame); renderFrames(); persist(); } },
+        { separator: true }
+      ];
+      const colorNames = ['緑', '青', 'オレンジ', '紫', 'グレー'];
+      FRAME_COLORS.forEach((c, i) => {
+        items.push({
+          label: '色: ' + colorNames[i],
+          run: () => { frame.color = c; renderFrames(); persist(); }
+        });
+      });
+      items.push({ separator: true });
+      items.push({
+        label: 'フレームを削除（中身は残す）',
+        danger: true,
+        run: () => removeFrame(frame.id)
+      });
+      openCtxMenu(e.clientX, e.clientY, items);
+    });
+
+    attachFrameDrag(el, frame);
+    attachFrameResize(handle, el, frame);
+    canvasEl.appendChild(el);
+  });
+}
+
+function renderNodes() {
+  canvasEl.querySelectorAll('.node').forEach(el => el.remove());
+  nodes.forEach(node => {
+    const el = document.createElement('div');
+    el.className = 'node' + (node.id === selectedId ? ' selected' : '');
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+    el.dataset.id = node.id;
+
+    const header = document.createElement('div');
+    header.className = 'node-header';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'node-header-name';
+    nameSpan.textContent = node.name || '無題';
+    header.appendChild(nameSpan);
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'node-collapse-toggle';
+    collapseBtn.textContent = node.collapsed ? '▸' : '▾';
+    collapseBtn.title = node.collapsed ? '項目も表示する' : 'ノード名だけ表示する';
+    collapseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      node.collapsed = !node.collapsed;
+      renderNodes();
+      renderConnections();
+      persist();
+    });
+    header.appendChild(collapseBtn);
+
+    el.appendChild(header);
+
+    if (!node.collapsed) {
+      const fieldsWrap = document.createElement('div');
+      fieldsWrap.className = 'node-fields';
+      (node.fields || []).forEach(field => {
+        const row = document.createElement('div');
+        row.className = 'node-field-row';
+
+        const toggle = document.createElement('button');
+        toggle.className = 'node-field-toggle';
+        toggle.textContent = field.expanded ? '▾' : '▸';
+        toggle.title = field.expanded ? '折りたたむ' : '展開する';
+        toggle.addEventListener('pointerdown', (e) => e.stopPropagation());
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          field.expanded = !field.expanded;
+          renderNodes();
+          renderConnections();
+          if (selectedId === node.id) renderPanel();
+          persist();
+        });
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'node-field-label';
+        labelSpan.textContent = field.label || '項目';
+
+        row.appendChild(toggle);
+        row.appendChild(labelSpan);
+        fieldsWrap.appendChild(row);
+
+        if (field.expanded) {
+          const valueDiv = document.createElement('div');
+          valueDiv.className = 'node-field-value';
+          valueDiv.textContent = field.value || '（未入力）';
+          fieldsWrap.appendChild(valueDiv);
+        }
+      });
+      el.appendChild(fieldsWrap);
+    }
+
+    const inSocket = document.createElement('div');
+    inSocket.className = 'socket in';
+    const outSocket = document.createElement('div');
+    outSocket.className = 'socket out';
+    el.appendChild(inSocket);
+    el.appendChild(outSocket);
+
+    attachNodeDrag(el, node);
+    attachSockets(el, node);
+    canvasEl.appendChild(el);
+  });
+}
+
+function renderAll() {
+  renderFrames();
+  renderNodes();
+  renderConnections();
+}
+
+function attachNodeDrag(el, node) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return; // 左ボタン以外（ホイールドラッグの視点移動など）は無視
+    if (e.target.classList.contains('socket')) return;
+    const startX = e.clientX, startY = e.clientY;
+    const initX = node.x, initY = node.y;
+    let moved = false;
+    function onMove(ev) {
+      const dx = (ev.clientX - startX) / scale, dy = (ev.clientY - startY) / scale;
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      node.x = Math.max(0, initX + dx);
+      node.y = Math.max(0, initY + dy);
+      el.style.left = node.x + 'px';
+      el.style.top = node.y + 'px';
+      renderConnections();
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) {
+        updateNodeMembership(node); // 離した位置でフレームへの出入りを決める
+        persist();
+      } else {
+        selectedId = node.id;
+        renderNodes();
+        renderPanel();
+      }
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function attachSockets(el, node) {
+  const outSocket = el.querySelector('.socket.out');
+  outSocket.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return; // 左ボタン以外では線を引き始めない
+    e.stopPropagation();
+    const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tempPath.setAttribute('class', 'temp-path');
+    svgEl.appendChild(tempPath);
+    const start = socketPos(node, 'out');
+    function onMove(ev) {
+      const cur = toCanvasCoords(ev.clientX, ev.clientY);
+      tempPath.setAttribute('d', bezier(start, cur));
+    }
+    function onUp(ev) {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      tempPath.remove();
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (target && target.classList.contains('socket') && target.classList.contains('in')) {
+        const targetNodeEl = target.closest('.node');
+        const targetId = targetNodeEl ? targetNodeEl.dataset.id : null;
+        if (targetId && targetId !== node.id) {
+          const exists = connections.some(c => c.from === node.id && c.to === targetId);
+          if (!exists) {
+            connections.push({ id: uid(), from: node.id, to: targetId, points: [] });
+            renderConnections();
+            persist();
+          }
+        }
+      }
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function renderPanel() {
+  const node = nodes.find(n => n.id === selectedId);
+  if (!node) {
+    panelEl.innerHTML = '<p class="empty-panel">ノードをクリックすると、ここで名前や項目を編集できます。</p>';
+    return;
+  }
+  if (!node.fields) node.fields = [];
+  panelEl.innerHTML = '';
+
+  const status = document.createElement('span');
+  status.className = 'save-status';
+
+  function scheduleSave() {
+    status.textContent = '保存中...';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => persist(status), 500);
+    renderNodes();
+  }
+
+  const nameLabel = document.createElement('p');
+  nameLabel.className = 'field-label';
+  nameLabel.textContent = 'ノード名';
+  panelEl.appendChild(nameLabel);
+
+  const nameInput = document.createElement('input');
+  nameInput.className = 'name-input';
+  nameInput.value = node.name;
+  nameInput.addEventListener('input', () => {
+    node.name = nameInput.value;
+    scheduleSave();
+  });
+  panelEl.appendChild(nameInput);
+
+  node.fields.forEach((field, idx) => {
+    const block = document.createElement('div');
+    block.className = 'field-block';
+
+    const header = document.createElement('div');
+    header.className = 'field-header';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'field-toggle';
+    toggleBtn.textContent = field.expanded ? '▾' : '▸';
+    toggleBtn.title = field.expanded ? '折りたたむ' : '展開する';
+    toggleBtn.addEventListener('click', () => {
+      field.expanded = !field.expanded;
+      renderPanel();
+      persist();
+    });
+
+    const labelInput = document.createElement('input');
+    labelInput.className = 'field-label-input';
+    labelInput.value = field.label;
+    labelInput.placeholder = '項目名';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'field-remove';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'この項目を削除';
+    removeBtn.addEventListener('click', () => {
+      node.fields.splice(idx, 1);
+      renderPanel();
+      renderNodes();
+      persist();
+    });
+
+    header.appendChild(toggleBtn);
+    header.appendChild(labelInput);
+    header.appendChild(removeBtn);
+    block.appendChild(header);
+
+    if (field.expanded) {
+      const valueInput = document.createElement('textarea');
+      valueInput.className = 'overview-input';
+      valueInput.value = field.value;
+      valueInput.placeholder = '内容を入力';
+      valueInput.addEventListener('input', () => {
+        field.value = valueInput.value;
+        scheduleSave();
+      });
+      block.appendChild(valueInput);
+    }
+
+    labelInput.addEventListener('input', () => {
+      field.label = labelInput.value;
+      scheduleSave();
+    });
+
+    panelEl.appendChild(block);
+  });
+
+  const addFieldBtn = document.createElement('button');
+  addFieldBtn.className = 'add-field-btn';
+  addFieldBtn.textContent = '+ 項目を追加';
+  addFieldBtn.addEventListener('click', () => {
+    node.fields.push({ id: uid(), label: '', value: '', expanded: true });
+    renderPanel();
+    persist();
+  });
+  panelEl.appendChild(addFieldBtn);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const delBtn = document.createElement('button');
+  delBtn.className = 'delete-btn';
+  delBtn.textContent = 'ノードを削除';
+  delBtn.onclick = () => {
+    if (!confirm('このノードと接続を削除しますか？')) return;
+    connections = connections.filter(c => c.from !== node.id && c.to !== node.id);
+    nodes = nodes.filter(n => n.id !== node.id);
+    selectedId = null;
+    renderAll();
+    renderPanel();
+    persist();
+  };
+  actions.appendChild(status);
+  actions.appendChild(delBtn);
+  panelEl.appendChild(actions);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/* ------------------------------------------------------------------
+   ホイールボタン（中ボタン）ドラッグで視点移動
+   e.button は MouseEvent / PointerEvent 標準のプロパティ（0=左, 1=ホイール, 2=右）。
+   Windows のブラウザは中ボタン押下で「オートスクロール」（丸いアイコンが出るやつ）を
+   始めてしまうので、mousedown と auxclick の既定動作を止めておく。
+   ここは .canvas を動かすのではなく、スクロールできる .canvas-wrap の
+   scrollLeft / scrollTop を動かしているだけなので、ズーム倍率での割り算は不要。
+------------------------------------------------------------------- */
+canvasWrapEl.addEventListener('mousedown', (e) => {
+  if (e.button === 1) e.preventDefault();
+});
+canvasWrapEl.addEventListener('auxclick', (e) => {
+  if (e.button === 1) e.preventDefault();
+});
+
+canvasWrapEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 1) return;
+  e.preventDefault();
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const startScrollLeft = canvasWrapEl.scrollLeft;
+  const startScrollTop = canvasWrapEl.scrollTop;
+  canvasWrapEl.classList.add('panning');
+
+  function onMove(ev) {
+    canvasWrapEl.scrollLeft = startScrollLeft - (ev.clientX - startX);
+    canvasWrapEl.scrollTop = startScrollTop - (ev.clientY - startY);
+  }
+  function stopPan() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', stopPan);
+    canvasWrapEl.classList.remove('panning');
+  }
+  function onUp(ev) {
+    if (ev.button !== 1) return; // 他のボタンを離しただけなら続行
+    stopPan();
+  }
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', stopPan);
+});
+
+canvasWrapEl.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const rect = canvasWrapEl.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const contentX = (canvasWrapEl.scrollLeft + mx) / scale;
+  const contentY = (canvasWrapEl.scrollTop + my) / scale;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+  canvasEl.style.transform = 'scale(' + scale + ')';
+  canvasWrapEl.scrollLeft = contentX * scale - mx;
+  canvasWrapEl.scrollTop = contentY * scale - my;
+}, { passive: false });
+
+document.getElementById('add-btn').addEventListener('click', () => {
+  const node = {
+    id: uid(), name: '新しいノード',
+    fields: [{ id: uid(), label: '概要', value: '', expanded: true }],
+    x: 40 + Math.random() * 120, y: 40 + Math.random() * 260
+  };
+  nodes.push(node);
+  updateNodeMembership(node);
+  selectedId = node.id;
+  renderAll();
+  renderPanel();
+  persist();
+});
+
+document.getElementById('add-frame-btn').addEventListener('click', () => {
+  const frame = normalizeFrame({
+    id: uid(),
+    label: '',
+    x: 40 + Math.random() * 80,
+    y: 40 + Math.random() * 120,
+    w: 360,
+    h: 240,
+    color: FRAME_COLORS[frames.length % FRAME_COLORS.length]
+  });
+  frames.push(frame);
+  nodes.forEach(updateNodeMembership); // 置いた場所に既にノードがあれば取り込む
+  renderAll();
+  persist();
+});
+
+/* ------------------------------------------------------------------
+   データ入出力（JSON）
+   使っているのは全てブラウザ標準のAPI：
+     JSON.stringify / JSON.parse、Blob、URL.createObjectURL、
+     <a download>、<input type="file">、File.text()、navigator.clipboard
+   ただし Artifact 上ではページ自身が始めるダウンロードがサンドボックスで
+   ブロックされるため、その場合はダウンロードボタンを無効化し、
+   テキストのコピーに誘導する。
+------------------------------------------------------------------- */
+const dataModalEl = document.getElementById('data-modal');
+const exportTextEl = document.getElementById('export-text');
+const importTextEl = document.getElementById('import-text');
+const exportMsgEl = document.getElementById('export-msg');
+const importMsgEl = document.getElementById('import-msg');
+const modalSummaryEl = document.getElementById('modal-summary');
+const downloadNoteEl = document.getElementById('download-note');
+const downloadBtnEl = document.getElementById('download-btn');
+const fileInputEl = document.getElementById('file-input');
+
+function setMsg(el, text, kind) {
+  el.textContent = text || '';
+  el.className = 'modal-msg' + (kind ? ' ' + kind : '');
+}
+
+function currentJson() {
+  return JSON.stringify({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    nodes: nodes,
+    connections: connections,
+    frames: frames
+  }, null, 2);
+}
+
+function updateModalSummary() {
+  modalSummaryEl.textContent = '今のグラフ：ノード ' + nodes.length +
+    ' 件 / 接続 ' + connections.length + ' 本 / フレーム ' + frames.length + ' 個';
+}
+
+function openDataModal() {
+  exportTextEl.value = currentJson();
+  importTextEl.value = '';
+  setMsg(exportMsgEl, '');
+  setMsg(importMsgEl, '');
+  updateModalSummary();
+  if (store.mode === 'artifact') {
+    downloadBtnEl.disabled = true;
+    downloadNoteEl.textContent = 'Artifact上ではページからのダウンロードがブロックされるため、上のテキストをコピーして保存してください。';
+  } else {
+    downloadBtnEl.disabled = false;
+    downloadNoteEl.textContent = '';
+  }
+  dataModalEl.hidden = false;
+}
+
+function closeDataModal() {
+  dataModalEl.hidden = true;
+}
+
+function timestamp() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+}
+
+function downloadJson() {
+  try {
+    const blob = new Blob([exportTextEl.value], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'feature-node-graph-' + timestamp() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMsg(exportMsgEl, 'ダウンロードを開始しました。', 'ok');
+  } catch (e) {
+    setMsg(exportMsgEl, 'ダウンロードできませんでした。テキストをコピーしてください。', 'err');
+  }
+}
+
+async function copyJson() {
+  const text = exportTextEl.value;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      exportTextEl.select();
+      document.execCommand('copy');
+    }
+    setMsg(exportMsgEl, 'コピーしました。', 'ok');
+  } catch (e) {
+    exportTextEl.select();
+    setMsg(exportMsgEl, 'コピーできませんでした。テキストを選択してCtrl+Cを押してください。', 'err');
+  }
+}
+
+function applyImport(text) {
+  if (!text || !text.trim()) {
+    setMsg(importMsgEl, 'JSONが空です。貼り付けるかファイルを選んでください。', 'err');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    setMsg(importMsgEl, 'JSONとして読み取れませんでした：' + e.message, 'err');
+    return;
+  }
+  let graph;
+  try {
+    graph = normalizeGraph(parsed);
+  } catch (e) {
+    setMsg(importMsgEl, e.message, 'err');
+    return;
+  }
+  if (!graph.nodes.length) {
+    setMsg(importMsgEl, '読み込めるノードが1件もありませんでした。', 'err');
+    return;
+  }
+
+  const modeEl = document.querySelector('input[name="import-mode"]:checked');
+  const mode = modeEl ? modeEl.value : 'replace';
+
+  if (mode === 'replace') {
+    nodes = graph.nodes;
+    connections = graph.connections;
+    frames = graph.frames;
+    selectedId = null;
+  } else {
+    // フレームを先に取り込み、IDが衝突したら振り直して node.frameId も追従させる
+    const usedFrameIds = new Set(frames.map(f => f.id));
+    const frameRemap = new Map();
+    graph.frames.forEach(f => {
+      if (usedFrameIds.has(f.id)) {
+        const newId = uid();
+        frameRemap.set(f.id, newId);
+        f.id = newId;
+      }
+      usedFrameIds.add(f.id);
+      frames.push(f);
+    });
+    graph.nodes.forEach(n => {
+      if (n.frameId && frameRemap.has(n.frameId)) n.frameId = frameRemap.get(n.frameId);
+    });
+
+    const usedNodeIds = new Set(nodes.map(n => n.id));
+    const remap = new Map();
+    graph.nodes.forEach(n => {
+      if (usedNodeIds.has(n.id)) {
+        const newId = uid();
+        remap.set(n.id, newId);
+        n.id = newId;
+      }
+      usedNodeIds.add(n.id);
+      nodes.push(n);
+    });
+    const usedPairs = new Set(connections.map(c => c.from + '>' + c.to));
+    const usedConnIds = new Set(connections.map(c => c.id));
+    graph.connections.forEach(c => {
+      const from = remap.get(c.from) || c.from;
+      const to = remap.get(c.to) || c.to;
+      const key = from + '>' + to;
+      if (usedPairs.has(key)) return;
+      usedPairs.add(key);
+      let cid = c.id;
+      if (usedConnIds.has(cid)) cid = uid();
+      usedConnIds.add(cid);
+      connections.push({ id: cid, from: from, to: to, points: c.points || [] });
+    });
+  }
+
+  renderAll();
+  renderPanel();
+  persist();
+  updateModalSummary();
+  exportTextEl.value = currentJson();
+  setMsg(importMsgEl,
+    (mode === 'replace' ? '置き換えました' : '追記しました') +
+    '（読み込んだノード ' + graph.nodes.length + ' 件 / 接続 ' + graph.connections.length +
+    ' 本 / フレーム ' + graph.frames.length + ' 個）。', 'ok');
+}
+
+document.getElementById('data-btn').addEventListener('click', openDataModal);
+document.getElementById('modal-close').addEventListener('click', closeDataModal);
+dataModalEl.addEventListener('click', (e) => {
+  if (e.target === dataModalEl) closeDataModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !dataModalEl.hidden) closeDataModal();
+});
+document.getElementById('copy-btn').addEventListener('click', copyJson);
+downloadBtnEl.addEventListener('click', downloadJson);
+document.getElementById('import-btn').addEventListener('click', () => applyImport(importTextEl.value));
+document.getElementById('file-btn').addEventListener('click', () => fileInputEl.click());
+fileInputEl.addEventListener('change', async () => {
+  const file = fileInputEl.files && fileInputEl.files[0];
+  if (!file) return;
+  try {
+    importTextEl.value = await file.text();
+    setMsg(importMsgEl, file.name + ' を読み込みました。内容を確認して「読み込む」を押してください。', 'ok');
+  } catch (err) {
+    setMsg(importMsgEl, 'ファイルを読めませんでした：' + err.message, 'err');
+  }
+  fileInputEl.value = '';
+});
+
+loadGraph();
+</script>
