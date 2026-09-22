@@ -10,8 +10,18 @@
       "collapsed": false,
       "frameId": null,
       "fields": [
-        { "id": "arc-image", "label": "画像", "value": "arc.png", "expanded": true },
-        { "id": "arc-conf", "label": "一致率", "value": "0.7", "expanded": true }
+        {
+          "id": "arc-image",
+          "label": "画像",
+          "value": "arc.png",
+          "expanded": true
+        },
+        {
+          "id": "arc-conf",
+          "label": "一致率",
+          "value": "0.7",
+          "expanded": true
+        }
       ]
     },
     {
@@ -22,8 +32,24 @@
       "collapsed": false,
       "frameId": null,
       "fields": [
-        { "id": "interception-image", "label": "画像", "value": "interception.png", "expanded": true },
-        { "id": "interception-conf", "label": "一致率", "value": "0.7", "expanded": true }
+        {
+          "id": "interception-screen",
+          "label": "画面",
+          "value": "arc_menu.png",
+          "expanded": true
+        },
+        {
+          "id": "interception-image",
+          "label": "画像",
+          "value": "interception.png",
+          "expanded": true
+        },
+        {
+          "id": "interception-conf",
+          "label": "一致率",
+          "value": "0.7",
+          "expanded": true
+        }
       ]
     },
     {
@@ -34,8 +60,18 @@
       "collapsed": false,
       "frameId": null,
       "fields": [
-        { "id": "special-image", "label": "画像", "value": "interception_special.png", "expanded": true },
-        { "id": "special-conf", "label": "一致率", "value": "0.7", "expanded": true }
+        {
+          "id": "special-image",
+          "label": "画像",
+          "value": "interception_special.png",
+          "expanded": true
+        },
+        {
+          "id": "special-conf",
+          "label": "一致率",
+          "value": "0.7",
+          "expanded": true
+        }
       ]
     },
     {
@@ -46,14 +82,39 @@
       "collapsed": false,
       "frameId": null,
       "fields": [
-        { "id": "home-image", "label": "画像", "value": "home.png", "expanded": true },
-        { "id": "home-conf", "label": "一致率", "value": "0.8", "expanded": true }
+        {
+          "id": "home-image",
+          "label": "画像",
+          "value": "home.png",
+          "expanded": true
+        },
+        {
+          "id": "home-conf",
+          "label": "一致率",
+          "value": "0.8",
+          "expanded": true
+        }
       ]
     }
   ],
   "connections": [
-    { "id": "c1", "from": "arc", "to": "interception", "points": [] },
-    { "id": "c2", "from": "interception", "to": "interception-special", "points": [] },
-    { "id": "c3", "from": "interception-special", "to": "go-home", "points": [] }
+    {
+      "id": "c1",
+      "from": "arc",
+      "to": "interception",
+      "points": []
+    },
+    {
+      "id": "c2",
+      "from": "interception",
+      "to": "interception-special",
+      "points": []
+    },
+    {
+      "id": "c3",
+      "from": "interception-special",
+      "to": "go-home",
+      "points": []
+    }
   ]
 }

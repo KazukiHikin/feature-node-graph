@@ -5,12 +5,13 @@ import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 import keyboard
 
 from runner import flow, overlay
 from runner.singleton_flag import SingletonFlag, ProgramInterrupted
-from games.nikke import IMAGE_DIR
+from games.nikke import IMAGE_DIR, SCREEN_DIR
 from games.nikke.window import activate_window
 
 #--------------------------------------------------------------
@@ -18,17 +19,23 @@ from games.nikke.window import activate_window
 #--  自分のPC内だけで動く小さなWebサーバー。外部には公開されない。
 #--
 #--  GET  /              editorの画面を返す
+#--  GET  /img/<名前>     クリックする画像を返す（ノード下部の表示用）
+#--  GET  /screens/<名前> ステップの画面全体を返す（ノード上部の表示用）
 #--  GET  /api/status    今の進行状況を返す（ブラウザが0.5秒ごとに聞きに来る）
 #--  POST /api/start     送られてきたグラフを手順として実行開始
 #--  POST /api/stop      中断
 #--
 #--管理者権限で実行すること（NIKKEへのクリックに必要）
-#--  python server.py   → ブラウザが自動で開く
+#--  python server.py                → ブラウザが自動で開く
+#--  python server.py --port 8766    → 別のポートで起動（既定は8765）
+#--  python server.py --no-browser   → ブラウザを開かない
 #--------------------------------------------------------------
 
 HOST = "127.0.0.1"      #自分のPCからしか接続できない
 PORT = 8765
 EDITOR_HTML = Path(__file__).resolve().parent / "editor" / "feature-node-graph.html"
+IMAGE_ROUTES = {"/img/": IMAGE_DIR, "/screens/": SCREEN_DIR}
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
 class RunState:
@@ -164,7 +171,29 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return None
 
+    def _send_image(self, folder, name):
+        #フォルダの外のファイルを要求されても返さない（"../" 等）
+        if "/" in name or "\\" in name or name in ("", ".", ".."):
+            self._send_json({"error": "bad name"}, 400)
+            return
+        path = (folder / name).resolve()
+        if folder.resolve() not in path.parents or not path.is_file():
+            print(f"画像が見つかりません: {folder.name}/{name}（ノードの項目のファイル名を確認してください）")
+            self._send_json({"error": "not found"}, 404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", IMAGE_TYPES.get(path.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")   #差し替えた画像がすぐ反映されるように
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        for prefix, folder in IMAGE_ROUTES.items():
+            if self.path.startswith(prefix):
+                self._send_image(folder, unquote(self.path[len(prefix):]))
+                return
         if self.path == "/" or self.path.startswith("/?"):
             body = EDITOR_HTML.read_bytes()
             self.send_response(200)
@@ -205,13 +234,16 @@ class Server(ThreadingHTTPServer):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)     #ログをファイルに向けても即座に出るように
+    port = PORT
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
     try:
-        server = Server((HOST, PORT), Handler)
+        server = Server((HOST, port), Handler)
     except OSError:
-        print(f"ポート{PORT}は使用中です。既に server.py が起動していませんか？（そちらのウィンドウで Ctrl+C）")
+        print(f"ポート{port}は使用中です。既に server.py が起動していませんか？（そちらのウィンドウで Ctrl+C）")
         sys.exit(1)
     threading.Thread(target=watch_keyboard, daemon=True).start()
-    url = f"http://{HOST}:{PORT}/"
+    url = f"http://{HOST}:{port}/"
     print(f"起動しました: {url}")
     print("ブラウザの画面から「開始」で実行できます。終了は Ctrl+C")
     if "--no-browser" not in sys.argv:

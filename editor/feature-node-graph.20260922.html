@@ -101,13 +101,6 @@
   .node.run-failed  { border-color: #D26B6B; box-shadow: 0 0 0 2px #D26B6B, 0 2px 6px rgba(0,0,0,0.35); }
   .node.run-interrupted { border-color: #8C8A82; box-shadow: 0 0 0 2px #8C8A82, 0 2px 6px rgba(0,0,0,0.35); }
   .node-run-result  { padding: 0 12px 8px; font-size: 11px; color: #A8A69F; }
-
-  /* ノード内の画像。上=そのステップの画面全体、下=クリックする画像（裏方サーバーがいる時だけ出る） */
-  .node-screen { padding: 4px 8px 0; }
-  .node-screen img { display: block; width: 100%; border-radius: 4px; border: 1px solid #3A3936; }
-  .node-target { padding: 6px 8px 8px; }
-  .node-target img { display: block; max-width: 100%; margin: 0 auto; border-radius: 4px; border: 1px solid #3A3936; }
-  .node img { pointer-events: none; user-select: none; }
   .node.run-running .node-run-result { color: #D9A25F; }
   .node.run-done    .node-run-result { color: #5DCAA5; }
   .node.run-failed  .node-run-result { color: #D26B6B; white-space: normal; word-break: break-all; }
@@ -1028,14 +1021,15 @@ function renderNodes() {
       el.classList.add('run-' + run.state);
       const resultEl = document.createElement('div');
       resultEl.className = 'node-run-result';
-      resultEl.textContent = runResultText(run);
+      resultEl.textContent =
+        run.state === 'running' ? '実行中…' :
+        run.state === 'done'    ? '一致率 ' + run.confidence :
+        run.state === 'interrupted' ? '中断' :
+        (run.message || '失敗');
       el.appendChild(resultEl);
     }
 
     if (!node.collapsed) {
-      // 上: そのステップの画面全体（項目「画面」）。裏方サーバーがいる時だけ表示できる
-      appendNodeImage(el, 'node-screen', assetUrl('/screens/', fieldValue(node, '画面')));
-
       const fieldsWrap = document.createElement('div');
       fieldsWrap.className = 'node-fields';
       (node.fields || []).forEach(field => {
@@ -1072,9 +1066,6 @@ function renderNodes() {
         }
       });
       el.appendChild(fieldsWrap);
-
-      // 下: クリックする画像（項目「画像」）
-      appendNodeImage(el, 'node-target', assetUrl('/img/', fieldValue(node, '画像')));
     }
 
     const inSocket = document.createElement('div');
@@ -1597,66 +1588,10 @@ fileInputEl.addEventListener('change', async () => {
 ------------------------------------------------------------------- */
 const runState = { steps: {}, current: null };
 let runPollTimer = null;
-let backendAvailable = false;   // 裏方サーバーがいる時 true。画像の表示可否もこれで決める
 const runBarEl = document.getElementById('run-bar');
 const runStartEl = document.getElementById('run-start');
 const runStopEl = document.getElementById('run-stop');
 const runStatusEl = document.getElementById('run-status');
-const RUN_STATE_CLASSES = ['run-running', 'run-done', 'run-failed', 'run-interrupted'];
-
-function runResultText(run) {
-  return run.state === 'running' ? '実行中…' :
-         run.state === 'done'    ? '一致率 ' + run.confidence :
-         run.state === 'interrupted' ? '中断' :
-         (run.message || '失敗');
-}
-
-// ノードの項目を名前で引く（「画像」「画面」など、決め打ちの項目名用）
-function fieldValue(node, label) {
-  const field = (node.fields || []).find(f => (f.label || '').trim() === label);
-  return field ? (field.value || '').trim() : '';
-}
-
-// 裏方サーバーが配る画像のURL。裏方がいない時や名前が空の時は null（表示しない）
-function assetUrl(prefix, fileName) {
-  if (!backendAvailable || !fileName) return null;
-  return prefix + encodeURIComponent(fileName);
-}
-
-function appendNodeImage(el, className, url) {
-  if (!url) return;
-  const wrap = document.createElement('div');
-  wrap.className = className;
-  const img = document.createElement('img');
-  img.src = url;
-  img.alt = '';
-  img.draggable = false;
-  img.addEventListener('error', () => { wrap.remove(); renderConnections(); });  // ファイルが無ければ枠ごと消す
-  img.addEventListener('load', renderConnections);   // 画像が入るとノードの高さが変わるので線を引き直す
-  wrap.appendChild(img);
-  el.appendChild(wrap);
-}
-
-// 実行状態だけを今あるノード要素に反映する。ノードを作り直さないので、画像が読み直されてちらつかない
-function applyRunStateToDom() {
-  canvasEl.querySelectorAll('.node').forEach(el => {
-    const run = runState.steps[el.dataset.id];
-    el.classList.remove(...RUN_STATE_CLASSES);
-    let resultEl = el.querySelector('.node-run-result');
-    if (run && run.state !== 'pending') {
-      el.classList.add('run-' + run.state);
-      if (!resultEl) {
-        resultEl = document.createElement('div');
-        resultEl.className = 'node-run-result';
-        el.querySelector('.node-header').after(resultEl);
-      }
-      resultEl.textContent = runResultText(run);
-    } else if (resultEl) {
-      resultEl.remove();
-    }
-  });
-  renderConnections();   // 結果行の増減で高さが変わる
-}
 
 function applyRunStatus(status) {
   runState.steps = status.steps || {};
@@ -1677,7 +1612,8 @@ function applyRunStatus(status) {
     runStatusEl.textContent = '';
   }
   runStatusEl.title = runStatusEl.textContent;
-  applyRunStateToDom();
+  renderNodes();
+  renderConnections();
 }
 
 function stopPolling() {
@@ -1736,15 +1672,13 @@ async function probeBackend() {
     const res = await fetch('/api/status', { cache: 'no-store' });
     if (!res.ok) return;
     const status = await res.json();
-    backendAvailable = true;
     runBarEl.hidden = false;
     runStartEl.addEventListener('click', startRun);
     runStopEl.addEventListener('click', stopRun);
-    renderNodes();          // 裏方がいると分かったので、ノードの画像を出す
     applyRunStatus(status);
     if (status.running) startPolling();
   } catch (e) {
-    // 裏方がいない（ファイルとして直接開いた等）。実行UIも画像も出さない
+    // 裏方がいない（ファイルとして直接開いた等）。実行UIは出さない
   }
 }
 
