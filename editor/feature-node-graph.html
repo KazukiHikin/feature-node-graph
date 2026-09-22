@@ -108,6 +108,9 @@
   .node-target { padding: 6px 8px 8px; }
   .node-target img { display: block; max-width: 100%; margin: 0 auto; border-radius: 4px; border: 1px solid #3A3936; }
   .node img { pointer-events: none; user-select: none; }
+  .panel-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .panel-tools .add-field-btn { width: auto; margin: 0; padding: 8px 14px; }
+  .panel-tools-msg { font-size: 12px; color: #A8A69F; }
   .node.run-running .node-run-result { color: #D9A25F; }
   .node.run-done    .node-run-result { color: #5DCAA5; }
   .node.run-failed  .node-run-result { color: #D26B6B; white-space: normal; word-break: break-all; }
@@ -1266,6 +1269,27 @@ function renderPanel() {
   });
   panelEl.appendChild(addFieldBtn);
 
+  // 裏方サーバーがいる時だけ: ゲーム画面の撮影（項目「画面」に入る）
+  if (backendAvailable) {
+    const toolsLabel = document.createElement('p');
+    toolsLabel.className = 'field-label';
+    toolsLabel.textContent = '画像';
+    panelEl.appendChild(toolsLabel);
+
+    const tools = document.createElement('div');
+    tools.className = 'panel-tools';
+    const captureBtn = document.createElement('button');
+    captureBtn.className = 'add-field-btn';
+    captureBtn.textContent = fieldValue(node, '画面') ? 'この画面を撮り直す' : 'この画面を撮る';
+    captureBtn.title = 'ゲームの窓を撮って、項目「画面」に入れます';
+    const toolsMsg = document.createElement('span');
+    toolsMsg.className = 'panel-tools-msg';
+    captureBtn.addEventListener('click', () => captureScreenForNode(node, captureBtn, toolsMsg));
+    tools.appendChild(captureBtn);
+    tools.appendChild(toolsMsg);
+    panelEl.appendChild(tools);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'actions';
   const delBtn = document.createElement('button');
@@ -1728,6 +1752,43 @@ async function stopRun() {
     runStatusEl.textContent = result.message || '';
   } catch (e) {
     runStatusEl.textContent = '停止できませんでした：' + e.message;
+  }
+}
+
+// ノードの項目を名前で探し、無ければ作って値を入れる
+function setFieldValue(node, label, value) {
+  if (!node.fields) node.fields = [];
+  let field = node.fields.find(f => (f.label || '').trim() === label);
+  if (!field) {
+    field = { id: uid(), label: label, value: '', expanded: true };
+    node.fields.unshift(field);   // 画像系の項目は上に置く
+  }
+  field.value = value;
+}
+
+async function captureScreenForNode(node, buttonEl, msgEl) {
+  buttonEl.disabled = true;
+  msgEl.textContent = '撮影中…（ゲームが一瞬前に出ます）';
+  try {
+    const res = await fetch('/api/capture-screen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: node.name, current: fieldValue(node, '画面') })
+    });
+    const result = await res.json();
+    if (result.ok) {
+      setFieldValue(node, '画面', result.file);
+      persist();
+      renderNodes();
+      renderConnections();
+      renderPanel();   // パネルを作り直すので、メッセージはここで終わり
+    } else {
+      msgEl.textContent = result.message || '撮影できませんでした';
+      buttonEl.disabled = false;
+    }
+  } catch (e) {
+    msgEl.textContent = '裏方に接続できません：' + e.message;
+    buttonEl.disabled = false;
   }
 }
 

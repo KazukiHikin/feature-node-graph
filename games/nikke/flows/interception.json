@@ -11,6 +11,12 @@
       "frameId": null,
       "fields": [
         {
+          "id": "arc-screen",
+          "label": "画面",
+          "value": "アーク.png",
+          "expanded": true
+        },
+        {
           "id": "arc-image",
           "label": "画像",
           "value": "arc.png",
@@ -35,7 +41,7 @@
         {
           "id": "interception-screen",
           "label": "画面",
-          "value": "arc_menu.png",
+          "value": "迎撃戦.png",
           "expanded": true
         },
         {

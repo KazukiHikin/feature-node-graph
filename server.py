@@ -1,6 +1,8 @@
 import json
+import re
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,11 +10,12 @@ from pathlib import Path
 from urllib.parse import unquote
 
 import keyboard
+import pyautogui
 
 from runner import flow, overlay
 from runner.singleton_flag import SingletonFlag, ProgramInterrupted
 from games.nikke import IMAGE_DIR, SCREEN_DIR
-from games.nikke.window import activate_window
+from games.nikke.window import activate_window, _find_main_window, _bring_to_front
 
 #--------------------------------------------------------------
 #--ブラウザ(editor)とPythonの橋渡し
@@ -24,12 +27,16 @@ from games.nikke.window import activate_window
 #--  GET  /api/status    今の進行状況を返す（ブラウザが0.5秒ごとに聞きに来る）
 #--  POST /api/start     送られてきたグラフを手順として実行開始
 #--  POST /api/stop      中断
+#--  POST /api/capture-screen  ゲーム窓を撮って screens/ に保存（ノードの「画面」用）
 #--
 #--管理者権限で実行すること（NIKKEへのクリックに必要）
 #--  python server.py                → ブラウザが自動で開く
 #--  python server.py --port 8766    → 別のポートで起動（既定は8765）
 #--  python server.py --no-browser   → ブラウザを開かない
 #--------------------------------------------------------------
+
+import ctypes
+user32 = ctypes.windll.user32
 
 HOST = "127.0.0.1"      #自分のPCからしか接続できない
 PORT = 8765
@@ -141,6 +148,51 @@ def stop_run():
     return True, "中断を要求しました"
 
 
+def _safe_file_stem(name):
+    #ファイル名に使えない文字を除く。空になったら "screen"
+    stem = re.sub(r'[\/:*?"<>|]', "", str(name)).strip().rstrip(".")
+    return stem[:60] or "screen"
+
+
+def _new_file_path(folder, stem, suffix=".png"):
+    #同じ名前があれば -2, -3 … と番号を付ける
+    path = folder / f"{stem}{suffix}"
+    n = 2
+    while path.exists():
+        path = folder / f"{stem}-{n}{suffix}"
+        n += 1
+    return path
+
+
+def capture_screen(node_name, current_file):
+    #ゲーム窓だけを撮って screens/ に保存し、ファイル名を返す。
+    #current_file（そのノードが既に持っている「画面」）があれば、そのファイルを撮り直す（上書き）
+    with state.lock:
+        if state.running:
+            return False, "実行中は撮影できません。停止してから撮ってください", None
+    window = _find_main_window()
+    if window is None:
+        return False, "ゲームのウィンドウが見つかりません。起動していますか？", None
+
+    previous_foreground = user32.GetForegroundWindow()
+    activate_window()
+    time.sleep(0.4)
+    shot = pyautogui.screenshot().crop((window.left, window.top,
+                                        window.left + window.width, window.top + window.height))
+
+    SCREEN_DIR.mkdir(exist_ok=True)
+    if current_file and (SCREEN_DIR / current_file).is_file():
+        path = SCREEN_DIR / current_file
+    else:
+        path = _new_file_path(SCREEN_DIR, _safe_file_stem(node_name))
+    shot.save(path)
+
+    if previous_foreground and previous_foreground != window._hWnd:
+        _bring_to_front(previous_foreground)   #ブラウザを前面に戻す
+    print(f"画面を撮りました: screens/{path.name} ({shot.width}x{shot.height})")
+    return True, f"撮りました: {path.name}", path.name
+
+
 def watch_keyboard():
     #実行中に何かキーが押されたら中断する（緊急停止用。ブラウザの「停止」と同じ効果）
     while True:
@@ -218,6 +270,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/stop":
             ok, message = stop_run()
             self._send_json({"ok": ok, "message": message})
+        elif self.path == "/api/capture-screen":
+            body = self._read_json() or {}
+            ok, message, file = capture_screen(body.get("name", ""), body.get("current", ""))
+            self._send_json({"ok": ok, "message": message, "file": file}, 200 if ok else 400)
         else:
             self._send_json({"error": "not found"}, 404)
 
