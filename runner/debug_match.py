@@ -6,6 +6,8 @@ import numpy as np
 import pyautogui
 from PIL import Image, ImageDraw
 
+from runner.image_io import read_image
+
 #--------------------------------------------------------------
 #--画像がどこに、どれくらいの一致率で見つかるかを確認する道具
 #--画像を差し替える時の確認用。自動化処理からは使わない
@@ -28,7 +30,7 @@ def check(image_name, screen_pil=None, save=True):
         image_path = image_path.with_suffix(".png")
     full_path = image_path if image_path.is_absolute() else IMAGE_DIR / image_path
 
-    needle = cv2.imread(str(full_path))
+    needle = read_image(full_path)
     if needle is None:
         print(f"[NG] 画像を読み込めません: {full_path}")
         return None

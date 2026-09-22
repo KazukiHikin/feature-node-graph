@@ -9,10 +9,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+import cv2
 import keyboard
+import numpy as np
 import pyautogui
+from PIL import Image
 
 from runner import flow, overlay
+from runner.image_io import read_image
 from runner.singleton_flag import SingletonFlag, ProgramInterrupted
 from games.nikke import IMAGE_DIR, SCREEN_DIR
 from games.nikke.window import activate_window, _find_main_window, _bring_to_front
@@ -28,6 +32,7 @@ from games.nikke.window import activate_window, _find_main_window, _bring_to_fro
 #--  POST /api/start     送られてきたグラフを手順として実行開始
 #--  POST /api/stop      中断
 #--  POST /api/capture-screen  ゲーム窓を撮って screens/ に保存（ノードの「画面」用）
+#--  POST /api/crop            画面の一部を切り出して img/ か screens/ に保存
 #--
 #--管理者権限で実行すること（NIKKEへのクリックに必要）
 #--  python server.py                → ブラウザが自動で開く
@@ -191,6 +196,60 @@ def capture_screen(node_name):
     return True, f"撮りました: {path.name}", path.name
 
 
+CROP_TARGETS = {"image": (IMAGE_DIR, "img"), "screen": (SCREEN_DIR, "screens")}
+
+
+def crop_image(source_file, box, node_name, target):
+    #screens/ にある画面画像から範囲を切り出し、img/ か screens/ に保存する。
+    #縮小表示ではなく元の画像から切るので、画像認識に使えるだけの画素が保たれる
+    if target not in CROP_TARGETS:
+        return False, "保存先の指定が不正です", None
+    folder, folder_name = CROP_TARGETS[target]
+
+    source = SCREEN_DIR / str(source_file)
+    if "/" in str(source_file) or "\\" in str(source_file) or not source.is_file():
+        return False, "切り抜く元の画面が見つかりません。先に「この画面を撮る」で撮ってください", None
+
+    try:
+        left, top, width, height = (int(round(float(box[k]))) for k in ("left", "top", "width", "height"))
+    except (KeyError, TypeError, ValueError):
+        return False, "範囲の指定が不正です", None
+
+    with Image.open(source) as im:
+        left, top = max(0, left), max(0, top)
+        right, bottom = min(im.width, left + width), min(im.height, top + height)
+        if right - left < 4 or bottom - top < 4:
+            return False, "範囲が小さすぎます。もう少し広くなぞってください", None
+        piece = im.convert("RGB").crop((left, top, right, bottom))
+        folder.mkdir(exist_ok=True)
+        path = _new_file_path(folder, _safe_file_stem(node_name))
+        piece.save(path)
+        note = _uniqueness_note(piece, im.convert("RGB")) if target == "image" else ""
+
+    print(f"切り抜きました: {folder_name}/{path.name} ({piece.width}x{piece.height})")
+    return True, f"保存しました: {path.name}{note}", path.name
+
+
+def _uniqueness_note(piece, screen):
+    #切り出した画像が元の画面内で何箇所に一致するか。複数あると別の場所を押す恐れがある
+    needle = cv2.cvtColor(np.array(piece), cv2.COLOR_RGB2BGR)
+    haystack = cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
+    if needle.shape[0] > haystack.shape[0] or needle.shape[1] > haystack.shape[1]:
+        return ""
+    result = cv2.matchTemplate(haystack, needle, cv2.TM_CCOEFF_NORMED)
+    ys, xs = np.where(result >= 0.9)
+    if len(xs) == 0:
+        return ""
+    #1〜2画素ずれの重なりは同じ場所として数える
+    spots = []
+    for x, y in sorted(zip(xs.tolist(), ys.tolist())):
+        if not any(abs(x - sx) < 10 and abs(y - sy) < 10 for sx, sy in spots):
+            spots.append((x, y))
+    if len(spots) > 1:
+        return f"（注意: 同じ模様が画面内に{len(spots)}箇所あります。別の場所を押す恐れがあるので、もう少し広く切り抜いてください）"
+    return ""
+
+
 def watch_keyboard():
     #実行中に何かキーが押されたら中断する（緊急停止用。ブラウザの「停止」と同じ効果）
     while True:
@@ -271,6 +330,11 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/capture-screen":
             body = self._read_json() or {}
             ok, message, file = capture_screen(body.get("name", ""))
+            self._send_json({"ok": ok, "message": message, "file": file}, 200 if ok else 400)
+        elif self.path == "/api/crop":
+            body = self._read_json() or {}
+            ok, message, file = crop_image(body.get("source", ""), body.get("box") or {},
+                                           body.get("name", ""), body.get("target", ""))
             self._send_json({"ok": ok, "message": message, "file": file}, 200 if ok else 400)
         else:
             self._send_json({"error": "not found"}, 404)

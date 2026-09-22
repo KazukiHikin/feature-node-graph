@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from runner import highlight
+from runner.image_io import read_image_or_raise
 from runner.singleton_flag import SingletonFlag, ProgramInterrupted
 
 #カレントディレクトリに関係なく画像を見つけられるよう、プロジェクトフォルダを基準にする
@@ -37,9 +38,7 @@ def _click(center):
 def _locate_image(full_image_path, pass_confidence):
     #画面から画像を探し、((左, 上, 幅, 高さ), 一致率)を返す。閾値未満なら矩形はNone。
     #pyautogui.locateOnScreenは一致率を返さないため、cv2で直接判定している。
-    needle = cv2.imread(full_image_path)
-    if needle is None:
-        raise FileNotFoundError(f"画像を読み込めません。パスかファイル形式を確認してください: {full_image_path}")
+    needle = read_image_or_raise(full_image_path)
 
     screen = cv2.cvtColor(np.array(pyautogui.screenshot()), cv2.COLOR_RGB2BGR)
     result = cv2.matchTemplate(screen, needle, cv2.TM_CCOEFF_NORMED)

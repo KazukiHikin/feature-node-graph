@@ -111,6 +111,31 @@
   .panel-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
   .panel-tools .add-field-btn { width: auto; margin: 0; padding: 8px 14px; }
   .panel-tools-msg { font-size: 12px; color: #A8A69F; }
+
+  /* 範囲の切り抜き */
+  .crop-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .crop-modal[hidden] { display: none; }
+  .crop-box {
+    background: #1B1B1A; border: 1px solid #454440; border-radius: 10px;
+    padding: 16px; max-width: 95vw; max-height: 95vh; display: flex; flex-direction: column; gap: 12px;
+  }
+  .crop-head { display: flex; align-items: center; gap: 12px; }
+  .crop-title { font-size: 14px; font-weight: 500; }
+  .crop-hint { font-size: 12px; color: #A8A69F; flex: 1; }
+  .crop-stage { position: relative; overflow: auto; background: #101010; border: 1px solid #333230; }
+  .crop-stage img { display: block; cursor: crosshair; user-select: none; }
+  .crop-rect {
+    position: absolute; border: 2px solid #5DCAA5; background: rgba(93,202,165,0.18);
+    pointer-events: none;
+  }
+  .crop-rect[hidden] { display: none; }
+  .crop-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  /* setMsg() が付ける .modal-msg に合わせる（色は既存ルールが効く。ここでは配置だけ） */
+  .crop-foot .modal-msg { flex: 1; min-width: 200px; margin: 0; }
+  .crop-foot .add-btn:disabled { opacity: 0.4; cursor: default; }
   .node.run-running .node-run-result { color: #D9A25F; }
   .node.run-done    .node-run-result { color: #5DCAA5; }
   .node.run-failed  .node-run-result { color: #D26B6B; white-space: normal; word-break: break-all; }
@@ -299,6 +324,25 @@
 </div>
 
 <div class="ctx-menu" id="ctx-menu" hidden></div>
+
+<div class="crop-modal" id="crop-modal" hidden>
+  <div class="crop-box">
+    <div class="crop-head">
+      <span class="crop-title" id="crop-title">範囲を切り抜く</span>
+      <span class="crop-hint">画像の上をドラッグして範囲を選び、保存先を選んでください</span>
+      <button class="add-btn" id="crop-close">閉じる</button>
+    </div>
+    <div class="crop-stage" id="crop-stage">
+      <img id="crop-image" alt="">
+      <div class="crop-rect" id="crop-rect" hidden></div>
+    </div>
+    <div class="crop-foot">
+      <button class="add-btn" id="crop-save-image">クリック画像として保存</button>
+      <button class="add-btn" id="crop-save-screen">画面として保存</button>
+      <span class="modal-msg" id="crop-msg"></span>
+    </div>
+  </div>
+</div>
 
 <div class="modal-backdrop" id="data-modal" hidden>
   <div class="modal">
@@ -1286,6 +1330,16 @@ function renderPanel() {
     toolsMsg.className = 'panel-tools-msg';
     captureBtn.addEventListener('click', () => captureScreenForNode(node, captureBtn, toolsMsg));
     tools.appendChild(captureBtn);
+
+    const cropBtn = document.createElement('button');
+    cropBtn.className = 'add-field-btn';
+    cropBtn.textContent = '範囲を切り抜く';
+    cropBtn.title = '撮った画面から範囲を選び、クリック画像または画面として保存します';
+    cropBtn.disabled = !fieldValue(node, '画面');
+    if (cropBtn.disabled) cropBtn.title = '先に「この画面を撮る」で画面を撮ってください';
+    cropBtn.addEventListener('click', () => openCropModal(node));
+    tools.appendChild(cropBtn);
+
     tools.appendChild(toolsMsg);
     panelEl.appendChild(tools);
   }
@@ -1791,6 +1845,134 @@ async function captureScreenForNode(node, buttonEl, msgEl) {
     buttonEl.disabled = false;
   }
 }
+
+/* ------------------------------------------------------------------
+   範囲の切り抜き
+   画面画像を等倍で表示し、ドラッグした範囲を「元の画像の座標」でサーバーに送る。
+   縮小表示から切ると画素がズレて画像認識の精度が落ちるため、切り出しはサーバーが
+   元のPNGに対して行う。
+   pointerdown / pointermove / pointercapture はブラウザ標準（ネイティブ）の機能。
+------------------------------------------------------------------- */
+const cropModalEl = document.getElementById('crop-modal');
+const cropImageEl = document.getElementById('crop-image');
+const cropRectEl = document.getElementById('crop-rect');
+const cropMsgEl = document.getElementById('crop-msg');
+const cropTitleEl = document.getElementById('crop-title');
+const cropSaveImageEl = document.getElementById('crop-save-image');
+const cropSaveScreenEl = document.getElementById('crop-save-screen');
+const cropState = { node: null, source: '', box: null, dragging: false, startX: 0, startY: 0 };
+
+function openCropModal(node) {
+  const source = fieldValue(node, '画面');
+  if (!source) {
+    return alert('先に「この画面を撮る」でゲーム画面を撮ってください。');
+  }
+  cropState.node = node;
+  cropState.source = source;
+  cropState.box = null;
+  cropRectEl.hidden = true;
+  cropTitleEl.textContent = '範囲を切り抜く：' + (node.name || '無題');
+  setMsg(cropMsgEl, '', '');
+  updateCropButtons();
+  cropImageEl.src = '/screens/' + encodeURIComponent(source);
+  cropModalEl.hidden = false;
+}
+
+function closeCropModal() {
+  cropModalEl.hidden = true;
+  cropState.node = null;
+}
+
+function updateCropButtons() {
+  const ready = !!cropState.box;
+  cropSaveImageEl.disabled = !ready;
+  cropSaveScreenEl.disabled = !ready;
+}
+
+// 表示上の座標 → 元画像の座標（表示が縮んでいても正しい位置になるよう倍率で割り戻す）
+function toImageCoords(clientX, clientY) {
+  const rect = cropImageEl.getBoundingClientRect();
+  const scaleX = cropImageEl.naturalWidth / rect.width;
+  const scaleY = cropImageEl.naturalHeight / rect.height;
+  return {
+    x: Math.min(Math.max(clientX - rect.left, 0), rect.width) * scaleX,
+    y: Math.min(Math.max(clientY - rect.top, 0), rect.height) * scaleY,
+    viewX: Math.min(Math.max(clientX - rect.left, 0), rect.width),
+    viewY: Math.min(Math.max(clientY - rect.top, 0), rect.height)
+  };
+}
+
+cropImageEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const p = toImageCoords(e.clientX, e.clientY);
+  cropState.dragging = true;
+  cropState.startX = p.viewX;
+  cropState.startY = p.viewY;
+  cropState.startImgX = p.x;
+  cropState.startImgY = p.y;
+  cropImageEl.setPointerCapture(e.pointerId);
+  cropRectEl.hidden = false;
+});
+
+cropImageEl.addEventListener('pointermove', (e) => {
+  if (!cropState.dragging) return;
+  const p = toImageCoords(e.clientX, e.clientY);
+  const imgRect = cropImageEl.getBoundingClientRect();
+  const stageRect = cropImageEl.parentElement.getBoundingClientRect();
+  const offsetLeft = imgRect.left - stageRect.left + cropImageEl.parentElement.scrollLeft;
+  const offsetTop = imgRect.top - stageRect.top + cropImageEl.parentElement.scrollTop;
+
+  cropRectEl.style.left = (Math.min(cropState.startX, p.viewX) + offsetLeft) + 'px';
+  cropRectEl.style.top = (Math.min(cropState.startY, p.viewY) + offsetTop) + 'px';
+  cropRectEl.style.width = Math.abs(p.viewX - cropState.startX) + 'px';
+  cropRectEl.style.height = Math.abs(p.viewY - cropState.startY) + 'px';
+
+  cropState.box = {
+    left: Math.min(cropState.startImgX, p.x),
+    top: Math.min(cropState.startImgY, p.y),
+    width: Math.abs(p.x - cropState.startImgX),
+    height: Math.abs(p.y - cropState.startImgY)
+  };
+  setMsg(cropMsgEl, '範囲 ' + Math.round(cropState.box.width) + ' x ' + Math.round(cropState.box.height) + ' 画素', '');
+  updateCropButtons();
+});
+
+cropImageEl.addEventListener('pointerup', () => { cropState.dragging = false; updateCropButtons(); });
+
+async function saveCrop(target) {
+  if (!cropState.box || !cropState.node) return;
+  cropSaveImageEl.disabled = true;
+  cropSaveScreenEl.disabled = true;
+  setMsg(cropMsgEl, '保存しています…', '');
+  try {
+    const res = await fetch('/api/crop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: cropState.source, box: cropState.box, name: cropState.node.name, target: target })
+    });
+    const result = await res.json();
+    if (result.ok) {
+      setFieldValue(cropState.node, target === 'image' ? '画像' : '画面', result.file);
+      persist();
+      renderNodes();
+      renderConnections();
+      renderPanel();
+      setMsg(cropMsgEl, result.message, 'ok');
+      if (target === 'screen') openCropModal(cropState.node);   // 切り抜いた画面で開き直す
+    } else {
+      setMsg(cropMsgEl, result.message, 'err');
+    }
+  } catch (e) {
+    setMsg(cropMsgEl, '裏方に接続できません：' + e.message, 'err');
+  }
+  updateCropButtons();
+}
+
+cropSaveImageEl.addEventListener('click', () => saveCrop('image'));
+cropSaveScreenEl.addEventListener('click', () => saveCrop('screen'));
+document.getElementById('crop-close').addEventListener('click', closeCropModal);
+cropModalEl.addEventListener('click', (e) => { if (e.target === cropModalEl) closeCropModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !cropModalEl.hidden) closeCropModal(); });
 
 async function probeBackend() {
   try {
