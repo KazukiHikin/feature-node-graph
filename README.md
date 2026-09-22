@@ -13,9 +13,7 @@
 ```
 editor/
   feature-node-graph.html          ノードグラフ画面（本体）
-  feature-node-graph.backup.html   最初の状態のバックアップ。触らない
-  feature-node-graph.20260920.html 実行UIを足す前の複製
-  feature-node-graph.20260922.html ノードに画像を出す前の複製
+  feature-node-graph.backup.html   最初の状態のバックアップ。触らない（それ以外の過去の状態はgitの履歴で戻せる）
 runner/
   flow.py              手順JSONを読んで順番に実行する
   wait_for_image.py    画像を探してクリック。リトライ・押し直し・中断判定
