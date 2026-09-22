@@ -36,7 +36,8 @@ if __name__ == "__main__":
     thread = threading.Thread(target=listen_for_key, daemon=True)
     thread.start()  # スレッドを開始
 
-    #----「自動操作中」の案内を表示（正常終了・中断・エラーのどれでも必ず消す）
+    #----先にゲームを前面に出してから、「自動操作中」の案内を表示（正常終了・中断・エラーのどれでも必ず消す）
+    activate_window()
     overlay_process = overlay.start()
 
     #----手順を順番に実行。各ステップの前にNIKKEを前面にする

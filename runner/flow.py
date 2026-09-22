@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from runner.singleton_flag import ProgramInterrupted
 from runner.wait_for_image import wait_for_image
 
 #--------------------------------------------------------------
@@ -38,7 +39,7 @@ class Step:
 
 
 def load_flow(json_path, image_dir):
-    #JSONを読み、順番に並んだStepのリストを返す。画像ファイルの存在もここで確認する
+    #JSONファイルを読み、順番に並んだStepのリストを返す
     path = Path(json_path)
     if not path.exists():
         raise FlowError(f"手順ファイルが見つかりません: {path}")
@@ -46,7 +47,13 @@ def load_flow(json_path, image_dir):
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise FlowError(f"手順ファイルのJSONが壊れています: {path} ({e})")
+    return parse_flow(data, image_dir)
 
+
+def parse_flow(data, image_dir):
+    #読み込み済みのグラフ(dict)をStepのリストに変換する。画像ファイルの存在もここで確認する
+    if not isinstance(data, dict):
+        raise FlowError("手順のJSONの形が違います（オブジェクトではありません）")
     nodes = data.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         raise FlowError("手順ファイルにノードがありません")
@@ -137,15 +144,33 @@ def describe(steps):
     return "\n".join(lines)
 
 
-def run_flow(steps, image_dir, before_each=None):
+def run_flow(steps, image_dir, before_each=None, on_event=None):
     #before_each: 各ステップの直前に呼ぶ関数（ゲームの窓を前面にする等）
+    #on_event:    進行状況を受け取る関数。dictが渡される（画面表示用。無くても動く）
+    #  {"type": "step_start",  "node_id", "index"}
+    #  {"type": "step_done",   "node_id", "confidence"}
+    #  {"type": "step_failed", "node_id", "message"}
+    #  {"type": "step_interrupted", "node_id"}
+    def notify(**event):
+        if on_event is not None:
+            on_event(event)
+
     for i, step in enumerate(steps, 1):
         print(f"===== ステップ {i}/{len(steps)}: {step.name} =====")
+        notify(type="step_start", node_id=step.node_id, index=i)
         if before_each is not None:
             before_each()
-        wait_for_image(
-            image_path=str(Path(image_dir) / step.image),
-            image_name=step.name,
-            pass_confidence=step.confidence,
-            retry_maxcount=step.retries,
-        )
+        try:
+            result = wait_for_image(
+                image_path=str(Path(image_dir) / step.image),
+                image_name=step.name,
+                pass_confidence=step.confidence,
+                retry_maxcount=step.retries,
+            )
+        except ProgramInterrupted:
+            notify(type="step_interrupted", node_id=step.node_id)
+            raise
+        except Exception as e:
+            notify(type="step_failed", node_id=step.node_id, message=str(e))
+            raise
+        notify(type="step_done", node_id=step.node_id, confidence=result.confidence)

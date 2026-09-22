@@ -94,28 +94,6 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   }
   .node.selected { border-color: #5DCAA5; box-shadow: 0 0 0 1px #5DCAA5; }
-
-  /* 実行状態。裏方サーバー（server.py）がいる時だけ付く */
-  .node.run-running { border-color: #D9A25F; box-shadow: 0 0 0 2px #D9A25F, 0 2px 6px rgba(0,0,0,0.35); }
-  .node.run-done    { border-color: #5DCAA5; }
-  .node.run-failed  { border-color: #D26B6B; box-shadow: 0 0 0 2px #D26B6B, 0 2px 6px rgba(0,0,0,0.35); }
-  .node.run-interrupted { border-color: #8C8A82; box-shadow: 0 0 0 2px #8C8A82, 0 2px 6px rgba(0,0,0,0.35); }
-  .node-run-result  { padding: 0 12px 8px; font-size: 11px; color: #A8A69F; }
-  .node.run-running .node-run-result { color: #D9A25F; }
-  .node.run-done    .node-run-result { color: #5DCAA5; }
-  .node.run-failed  .node-run-result { color: #D26B6B; white-space: normal; word-break: break-all; }
-  .run-bar { display: flex; align-items: center; gap: 8px; }
-  .run-bar[hidden] { display: none; }
-  .run-status {
-    font-size: 12px; color: #A8A69F; max-width: 280px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  #run-start { border-color: #5DCAA5; color: #5DCAA5; }
-  #run-stop  { border-color: #D26B6B; color: #D26B6B; }
-  .add-btn:disabled { opacity: 0.4; cursor: default; }
-  .add-btn:disabled:hover { border-color: #454440; color: #EDEBE3; }
-  #run-start:disabled:hover { border-color: #5DCAA5; color: #5DCAA5; }
-  #run-stop:disabled:hover  { border-color: #D26B6B; color: #D26B6B; }
   .node-header {
     display: flex; align-items: center; gap: 6px;
     padding: 9px 8px 9px 12px; font-size: 13px; font-weight: 500; cursor: grab;
@@ -267,11 +245,6 @@
       <p>ドラッグで移動、ソケット同士をつなぐと関係線が引けます。線や点・フレームは右クリックでメニュー。フレームに入れたノードはフレームごと動きます。ホイールボタンを押しながら動かすと視点移動、Ctrl+ホイールで拡大縮小。</p>
     </div>
     <div class="header-actions">
-      <div class="run-bar" id="run-bar" hidden>
-        <button class="add-btn" id="run-start">▶ 開始</button>
-        <button class="add-btn" id="run-stop">■ 停止</button>
-        <span class="run-status" id="run-status"></span>
-      </div>
       <span class="storage-badge" id="storage-badge">保存先を確認中…</span>
       <button class="add-btn" id="data-btn">データ</button>
       <button class="add-btn" id="add-frame-btn">+ フレーム</button>
@@ -1015,20 +988,6 @@ function renderNodes() {
 
     el.appendChild(header);
 
-    // 実行状態（裏方サーバーがいる時だけ入る）。折りたたみ中でも見えるようヘッダー直下に出す
-    const run = runState.steps[node.id];
-    if (run && run.state !== 'pending') {
-      el.classList.add('run-' + run.state);
-      const resultEl = document.createElement('div');
-      resultEl.className = 'node-run-result';
-      resultEl.textContent =
-        run.state === 'running' ? '実行中…' :
-        run.state === 'done'    ? '一致率 ' + run.confidence :
-        run.state === 'interrupted' ? '中断' :
-        (run.message || '失敗');
-      el.appendChild(resultEl);
-    }
-
     if (!node.collapsed) {
       const fieldsWrap = document.createElement('div');
       fieldsWrap.className = 'node-fields';
@@ -1579,109 +1538,5 @@ fileInputEl.addEventListener('change', async () => {
   fileInputEl.value = '';
 });
 
-/* ------------------------------------------------------------------
-   実行（裏方サーバーがいる時だけ有効）
-   この画面を server.py 経由（http://127.0.0.1:8765/）で開くと /api/status が
-   応答するので、その時だけ「開始」「停止」を表示する。ファイルとして直接開いた
-   時は応答が無いので、メモ用途のままで何も変わらない。
-   fetch / setInterval はブラウザ標準（ネイティブ）の機能。
-------------------------------------------------------------------- */
-const runState = { steps: {}, current: null };
-let runPollTimer = null;
-const runBarEl = document.getElementById('run-bar');
-const runStartEl = document.getElementById('run-start');
-const runStopEl = document.getElementById('run-stop');
-const runStatusEl = document.getElementById('run-status');
-
-function applyRunStatus(status) {
-  runState.steps = status.steps || {};
-  runState.current = status.current || null;
-  runStartEl.disabled = !!status.running;
-  runStopEl.disabled = !status.running;
-
-  const order = status.order || [];
-  const doneCount = order.filter(id => (runState.steps[id] || {}).state === 'done').length;
-  if (status.running) {
-    const cur = runState.steps[status.current];
-    runStatusEl.textContent = '実行中 ' + doneCount + '/' + order.length + (cur ? '：' + cur.name : '');
-  } else if (status.error) {
-    runStatusEl.textContent = status.error;
-  } else if (status.finished) {
-    runStatusEl.textContent = '完了 ' + doneCount + '/' + order.length;
-  } else {
-    runStatusEl.textContent = '';
-  }
-  runStatusEl.title = runStatusEl.textContent;
-  renderNodes();
-  renderConnections();
-}
-
-function stopPolling() {
-  if (runPollTimer) { clearInterval(runPollTimer); runPollTimer = null; }
-}
-
-async function pollRunStatus() {
-  try {
-    const res = await fetch('/api/status', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const status = await res.json();
-    applyRunStatus(status);
-    if (!status.running) stopPolling();
-  } catch (e) {
-    stopPolling();
-    runStatusEl.textContent = '裏方に接続できません（server.py が止まっていませんか）';
-  }
-}
-
-function startPolling() {
-  if (!runPollTimer) runPollTimer = setInterval(pollRunStatus, 500);
-}
-
-async function startRun() {
-  runStatusEl.textContent = '開始しています…';
-  try {
-    const res = await fetch('/api/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes: nodes, connections: connections, frames: frames })
-    });
-    const result = await res.json();
-    runStatusEl.textContent = result.message || '';
-    runStatusEl.title = runStatusEl.textContent;
-    if (result.ok) {
-      await pollRunStatus();
-      startPolling();
-    }
-  } catch (e) {
-    runStatusEl.textContent = '開始できませんでした：' + e.message;
-  }
-}
-
-async function stopRun() {
-  try {
-    const res = await fetch('/api/stop', { method: 'POST' });
-    const result = await res.json();
-    runStatusEl.textContent = result.message || '';
-  } catch (e) {
-    runStatusEl.textContent = '停止できませんでした：' + e.message;
-  }
-}
-
-async function probeBackend() {
-  try {
-    const res = await fetch('/api/status', { cache: 'no-store' });
-    if (!res.ok) return;
-    const status = await res.json();
-    runBarEl.hidden = false;
-    runStartEl.addEventListener('click', startRun);
-    runStopEl.addEventListener('click', stopRun);
-    applyRunStatus(status);
-    if (status.running) startPolling();
-  } catch (e) {
-    // 裏方がいない（ファイルとして直接開いた等）。実行UIは出さない
-  }
-}
-
 loadGraph();
-probeBackend();
 </script>

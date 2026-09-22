@@ -2,12 +2,19 @@ import cv2
 import numpy as np
 import pyautogui
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from runner import highlight
 from runner.singleton_flag import SingletonFlag, ProgramInterrupted
 
 #カレントディレクトリに関係なく画像を見つけられるよう、プロジェクトフォルダを基準にする
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+@dataclass
+class ClickResult:
+    center: tuple      #クリックした座標
+    confidence: float  #見つかった時の一致率
+
 
 #クリックの動き。NIKKEはタッチ操作を模しているため、到着直後の一瞬の押下は取りこぼされることがある
 MOVE_DURATION = 1.0     #マウスを目的地まで動かす秒数
@@ -61,21 +68,21 @@ def wait_for_image (image_path,image_name, pass_confidence, retry_maxcount=10) :
     while retry_count < retry_maxcount:
         #中断フラグが立っていたら処理を中断する
         if flag_manager.is_stop_requested():
-            raise ProgramInterrupted(f"「{image_name}」の待機中にキー入力を検知したため処理を中断しました")
+            raise ProgramInterrupted(f"「{image_name}」を待っている途中で中断しました")
 
         box, confidence = _locate_image(full_image_path, pass_confidence)
 
         if box is None:
             #time関数で1秒待ってから再度処理が流れる
             retry_count += 1
-            print(f"画像、{image_name}が見つかりません。一致率{confidence:.3f}/必要{pass_confidence}。画像パス、{image_path}。{retry_count}/{retry_maxcount}回目の再確認。{time_count}秒後に再確認します")
+            print(f"画像、{image_name}が見つかりません。一致率{confidence:.3f}/必要{pass_confidence}。画像 {Path(image_path).name}。{retry_count}/{retry_maxcount}回目の再確認。{time_count}秒後に再確認します")
             time.sleep(time_count)
             continue
 
         #見つかったのでクリック。押した後に画像が消えていなければ（＝画面が変わっていなければ）押し直す
         for attempt in range(1, CLICK_RETRY_MAX + 1):
             if flag_manager.is_stop_requested():
-                raise ProgramInterrupted(f"「{image_name}」のクリック中にキー入力を検知したため処理を中断しました")
+                raise ProgramInterrupted(f"「{image_name}」をクリックする途中で中断しました")
 
             left, top, width, height = box
             center = (left + width // 2, top + height // 2)
@@ -91,10 +98,10 @@ def wait_for_image (image_path,image_name, pass_confidence, retry_maxcount=10) :
                 print(f"OK:{image_name}のセンター位置にマウス移動＋クリックが完了しました。一致率{confidence:.3f}/必要{pass_confidence}")
                 print("")
                 #関数処理終了させるためreturnを使う
-                return center
+                return ClickResult(center=center, confidence=confidence)
 
             print(f"クリックしましたが画面が変わっていません（{image_name}がまだ見えている。一致率{still_confidence:.3f}）。{attempt}/{CLICK_RETRY_MAX}回目、押し直します")
 
         raise RuntimeError(f"「{image_name}」を{CLICK_RETRY_MAX}回クリックしても画面が変わりませんでした。処理を中断します")
 
-    raise RuntimeError(f"画像{image_path}が見つかりませんでした。最大試行回数{retry_maxcount}回に到達しました。raise呼び出しの為処理を中断します")
+    raise RuntimeError(f"「{image_name}」の画像 {Path(image_path).name} が画面に見つかりませんでした（{retry_maxcount}回確認）")

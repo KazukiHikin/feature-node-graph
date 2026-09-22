@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "frames": [],
+  "nodes": [
+    {
+      "id": "arc",
+      "name": "アーク",
+      "x": 60,
+      "y": 120,
+      "collapsed": false,
+      "frameId": null,
+      "fields": [
+        { "id": "arc-image", "label": "画像", "value": "arc.png", "expanded": true },
+        { "id": "arc-conf", "label": "一致率", "value": "0.7", "expanded": true }
+      ]
+    },
+    {
+      "id": "interception",
+      "name": "迎撃戦",
+      "x": 320,
+      "y": 120,
+      "collapsed": false,
+      "frameId": null,
+      "fields": [
+        { "id": "interception-image", "label": "画像", "value": "interception.png", "expanded": true },
+        { "id": "interception-conf", "label": "一致率", "value": "0.7", "expanded": true }
+      ]
+    },
+    {
+      "id": "interception-special",
+      "name": "迎撃戦-特殊個体",
+      "x": 580,
+      "y": 120,
+      "collapsed": false,
+      "frameId": null,
+      "fields": [
+        { "id": "special-image", "label": "画像", "value": "interception_special.png", "expanded": true },
+        { "id": "special-conf", "label": "一致率", "value": "0.7", "expanded": true }
+      ]
+    },
+    {
+      "id": "go-home",
+      "name": "ホームへ戻る",
+      "x": 840,
+      "y": 120,
+      "collapsed": false,
+      "frameId": null,
+      "fields": [
+        { "id": "home-image", "label": "画像", "value": "home.png", "expanded": true },
+        { "id": "home-conf", "label": "一致率", "value": "0.8", "expanded": true }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "c1", "from": "arc", "to": "interception", "points": [] },
+    { "id": "c2", "from": "interception", "to": "interception-special", "points": [] },
+    { "id": "c3", "from": "interception-special", "to": "go-home", "points": [] }
+  ]
+}
