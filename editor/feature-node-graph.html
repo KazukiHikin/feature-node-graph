@@ -1281,7 +1281,7 @@ function renderPanel() {
     const captureBtn = document.createElement('button');
     captureBtn.className = 'add-field-btn';
     captureBtn.textContent = fieldValue(node, '画面') ? 'この画面を撮り直す' : 'この画面を撮る';
-    captureBtn.title = 'ゲームの窓を撮って、項目「画面」に入れます';
+    captureBtn.title = 'ゲームの窓を撮って、項目「画面」に入れます（前の画像は screens/ に残ります）';
     const toolsMsg = document.createElement('span');
     toolsMsg.className = 'panel-tools-msg';
     captureBtn.addEventListener('click', () => captureScreenForNode(node, captureBtn, toolsMsg));
@@ -1773,7 +1773,7 @@ async function captureScreenForNode(node, buttonEl, msgEl) {
     const res = await fetch('/api/capture-screen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: node.name, current: fieldValue(node, '画面') })
+      body: JSON.stringify({ name: node.name })
     });
     const result = await res.json();
     if (result.ok) {

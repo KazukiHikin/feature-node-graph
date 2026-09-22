@@ -155,18 +155,19 @@ def _safe_file_stem(name):
 
 
 def _new_file_path(folder, stem, suffix=".png"):
-    #同じ名前があれば -2, -3 … と番号を付ける
-    path = folder / f"{stem}{suffix}"
+    #「ノード名_年月日-時分」。同じ分に撮り直しても上書きしないよう、被ったら -2, -3 と付ける
+    base = f"{stem}_{time.strftime('%Y%m%d-%H%M')}"
+    path = folder / f"{base}{suffix}"
     n = 2
     while path.exists():
-        path = folder / f"{stem}-{n}{suffix}"
+        path = folder / f"{base}-{n}{suffix}"
         n += 1
     return path
 
 
-def capture_screen(node_name, current_file):
+def capture_screen(node_name):
     #ゲーム窓だけを撮って screens/ に保存し、ファイル名を返す。
-    #current_file（そのノードが既に持っている「画面」）があれば、そのファイルを撮り直す（上書き）
+    #撮るたびに「ノード名_日時.png」で新しく作る（前の画像は残るので見比べられる）
     with state.lock:
         if state.running:
             return False, "実行中は撮影できません。停止してから撮ってください", None
@@ -181,10 +182,7 @@ def capture_screen(node_name, current_file):
                                         window.left + window.width, window.top + window.height))
 
     SCREEN_DIR.mkdir(exist_ok=True)
-    if current_file and (SCREEN_DIR / current_file).is_file():
-        path = SCREEN_DIR / current_file
-    else:
-        path = _new_file_path(SCREEN_DIR, _safe_file_stem(node_name))
+    path = _new_file_path(SCREEN_DIR, _safe_file_stem(node_name))
     shot.save(path)
 
     if previous_foreground and previous_foreground != window._hWnd:
@@ -272,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": ok, "message": message})
         elif self.path == "/api/capture-screen":
             body = self._read_json() or {}
-            ok, message, file = capture_screen(body.get("name", ""), body.get("current", ""))
+            ok, message, file = capture_screen(body.get("name", ""))
             self._send_json({"ok": ok, "message": message, "file": file}, 200 if ok else 400)
         else:
             self._send_json({"error": "not found"}, 404)
